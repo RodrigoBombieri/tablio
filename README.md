@@ -1,0 +1,51 @@
+# Tablio
+
+**De planilla a sistema.**
+
+Tablio convierte una tabla de Excel en un módulo web para consultar y editar registros. Esta implementación cubre el Proof of Concept V0 definido en el [Project Brief](Tablio%20%E2%80%94%20Project%20Brief.md). Funciona en un equipo local, con datos ficticios o anonimizados.
+
+## Ejecutar en Visual Studio Code
+
+Requisito: Python 3.11 o superior. Abrí la carpeta del repositorio en VS Code y ejecutá en la terminal:
+
+```powershell
+python -m app.server
+```
+
+Abrí `http://127.0.0.1:8000` en el navegador. No hay paquetes externos que instalar. La base SQLite se crea automáticamente en `data/tablio.sqlite3`. Las importaciones pendientes se guardan temporalmente en `uploads/` y vencen a las 24 horas. Ambas rutas quedan fuera del control de versiones.
+
+Para verificar el flujo:
+
+```powershell
+python -m unittest discover -s tests -v
+```
+
+Si el puerto 8000 está ocupado, configurá `TABLIO_PORT` antes de iniciar el servidor.
+
+## Primer recorrido
+
+1. Seleccioná **Importar una planilla**.
+2. Elegí [minimercado.xlsx](outputs/01a06e97-c8d6-7c20-aebd-4c816513d8af/minimercado.xlsx) o [corralon_materiales.xlsx](outputs/01a06e97-c8d6-7c20-aebd-4c816513d8af/corralon_materiales.xlsx).
+3. Revisá los tipos de campo. Para categorías, rubros, unidad y estado, podés seleccionar **Opciones** y confirmar la lista separada por comas.
+4. Si la planilla tiene fórmulas con errores, corregilas en la lista por fila y columna antes de confirmar. Se admiten operaciones `+`, `-`, `*`, `/`, paréntesis y referencias de la misma fila, incluidas referencias de tabla.
+5. Confirmá la importación. Luego probá búsqueda, filtros, paginación, edición y exportación. Los campos calculados se actualizan al editar sus entradas y se exportan como fórmulas.
+
+Los datos de prueba son sintéticos. La [guía de los dos XLSX](docs/FIXTURES.md) indica sus columnas y valores especiales.
+
+## Estructura
+
+```text
+app/       Servidor local, análisis, validación y persistencia
+web/       Interfaz responsive en HTML, CSS y JavaScript
+tests/     Pruebas del recorrido con ambos XLSX
+docs/      Planificación, arquitectura y decisiones
+outputs/   Dos archivos Excel de prueba
+data/      Base local creada al ejecutar (ignorada)
+uploads/   Archivos temporales de importación (ignorados)
+```
+
+El [registro de decisiones](docs/DECISIONS.md) explica por qué la implementación local usa Python y SQLite en esta etapa. La [planificación](docs/PLANNING.md) distingue las funciones implementadas de las pendientes del MVP.
+
+## Límite de uso
+
+V0 se ejecuta solo en `127.0.0.1`, con un único operador y sin autenticación. No debe exponerse a internet ni utilizarse con datos reales de clientes hasta implementar acceso, aislamiento entre organizaciones, copias de seguridad y controles operativos del MVP.

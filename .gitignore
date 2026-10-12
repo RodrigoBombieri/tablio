@@ -1,0 +1,26 @@
+# Dependencias y salidas locales de JavaScript / TypeScript
+node_modules/
+.next/
+out/
+dist/
+coverage/
+*.tsbuildinfo
+
+# Variables de entorno locales; las plantillas pueden versionarse
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Archivos temporales y datos de ejecución
+/tmp/
+/uploads/
+/data/
+__pycache__/
+*.pyc
+*.log
+
+# Sistema operativo
+.DS_Store
+Thumbs.db
+Desktop.ini
