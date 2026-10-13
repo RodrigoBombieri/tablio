@@ -86,7 +86,7 @@ Salida esperada: entidad y registros persistidos sin importaciones parciales.
 6. Los datos persisten y la exportación preserva sus valores y tipos admitidos.
 7. Una segunda planilla compatible funciona sin pantallas específicas.
 
-`python -m unittest discover -s tests -v` verifica ambos XLSX, importación, reintentos, paginación, filtro, CRUD, exportación, errores de conversión, fórmulas simples y corrección de una fórmula inválida. La interfaz previa se revisó en el navegador local con el libro del minimercado; la nueva lista de corrección aún no tiene revisión visual específica.
+`python -m unittest discover -s tests -v` verifica ambos XLSX, importación, reintentos, paginación, filtro, CRUD, exportación, errores de conversión, fórmulas, correcciones, reimportación, configuración y accesos. La revisión visual anterior corresponde al flujo V0; las pantallas nuevas todavía necesitan una evaluación de uso completa.
 
 ## Preparación del MVP
 
@@ -98,6 +98,7 @@ Salida esperada: entidad y registros persistidos sin importaciones parciales.
 - [x] Almacenamiento privado de la base y los XLSX temporales.
 - [x] Copias SQLite automáticas, verificación de integridad y comando de restauración.
 - [x] Configuración de Docker Compose y Caddy para HTTPS con dominio real.
+- [x] Invitaciones privadas de un solo uso, restablecimiento por enlace, actividad de cambios y monitoreo básico de la última copia.
 - [ ] Publicar en un servidor con dominio y comprobar certificado y redirección HTTPS.
 - [ ] Configurar copia cifrada fuera del servidor, monitoreo y prueba periódica de restauración.
 - [ ] Revisar la seguridad operativa y la interfaz completa antes de un piloto con datos reales.
@@ -107,6 +108,18 @@ Antes de ampliar el producto, estudiar aproximadamente 5 a 10 planillas reales, 
 La base técnica de acceso y separación entre organizaciones está implementada y tiene pruebas de API. La operación real todavía depende de un servidor y dominio, copias externas y una revisión de seguridad; ver SECURITY_DEPLOYMENT.md. No tratar las pruebas locales como validación de un servicio público.
 
 ## Registro de avances
+
+### Mejoras posteriores al PoC
+
+- [x] Reimportar un XLSX sobre un módulo existente mediante una columna identificadora, con vista previa de altas, cambios, filas sin cambios y conflictos por clave duplicada. No se borran filas ausentes.
+- [x] Aplicar la reimportación en una transacción, detectar cambios entre vista previa y confirmación, admitir reintentos sin duplicar y deshacer una actualización si sus registros no se editaron después.
+- [x] Comprobar todas las filas antes de la importación inicial y corregir valores y fórmulas por fila y campo desde la revisión.
+- [x] Configurar nombres, obligatoriedad y opciones de campos existentes; agregar campos opcionales sin perder datos; guardar vistas personales con filtros, orden y columnas visibles.
+- [x] Ejecutar búsqueda, filtro, orden y paginación en SQLite, evitando cargar todos los registros para cada página.
+- [x] Registrar actividad de cambios, crear invitaciones de un solo uso y permitir restablecer contraseñas mediante enlaces de una hora; comprobar antigüedad e integridad del último backup.
+- [ ] Validar la experiencia completa con personas usuarias de distintas edades y planillas reales; ajustar textos, tamaño y navegación según observaciones.
+- [ ] Configurar copia cifrada fuera del servidor y ensayar la recuperación desde ella.
+- [ ] Publicar con dominio real, verificar HTTPS y realizar revisión de seguridad operativa.
 
 | Fecha | Avance | Evidencia |
 |---|---|---|
@@ -122,6 +135,10 @@ La base técnica de acceso y separación entre organizaciones está implementada
 | 2026-10-12 | Fórmulas simples y corrección durante la revisión de importación | `app/formulas.py`, `app/core.py`, `web/app.js`, pruebas y libro real del usuario; DECISIONS.md, R-005 |
 | 2026-10-12 | Traslado del trabajo al repositorio Git indicado por el usuario | `C:\Users\Rodrigo\Escritorio\Repositorio Git\tablio`, rama `main`, remoto `origin` |
 | 2026-10-12 | Acceso, roles, organizaciones, datos privados, backups y configuración HTTPS | `app/security.py`, `app/store.py`, `app/backup.py`, `compose.yaml`, `Caddyfile`, SECURITY_DEPLOYMENT.md; 12 pruebas, imagen y servicios Docker verificados; DECISIONS.md, R-006 |
-| 2026-10-12 | Copia verificada y migración de la base existente del nuevo repositorio | Backup privado en `backups/`, dos módulos preservados en `Legado V0`; falta crear el primer propietario por CLI |
+| 2026-10-12 | Copia verificada y migración de la base existente del nuevo repositorio | Backup privado en `backups/`, dos módulos preservados en `Legado V0`; el propietario se creó y comprobó después |
+| 2026-10-13 | Reimportación incremental con comparación, clave única, historial y deshacer condicionado | `app/reimport.py`, `app/store.py`, `app/server.py`, `web/app.js`, prueba HTTP |
+| 2026-10-13 | Revisión de filas, corrección de datos y fórmulas antes de guardar | `app/server.py`, `web/app.js`, prueba de corrección |
+| 2026-10-13 | Configuración de campos, vistas personales, búsqueda y paginación SQL | `app/store.py`, `web/index.html`, `web/app.js`, prueba HTTP |
+| 2026-10-13 | Actividad, invitaciones, recuperación y estado de backups; controles de lectura ampliados | `app/store.py`, `app/backup.py`, `compose.yaml`, pruebas de permisos y recuperación |
 
 Actualizar las casillas y agregar evidencia en esta sección cada vez que se complete una tarea. Registrar cambios de alcance o arquitectura también en DECISIONS.md. No marcar implementación o pruebas como completadas por haberlas documentado.

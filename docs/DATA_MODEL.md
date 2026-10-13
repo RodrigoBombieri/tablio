@@ -2,7 +2,7 @@
 
 ## Estado
 
-Contrato de diseño adoptado para V0 el 2026-09-04. Desde 2026-10-12 hay un validador y tablas SQLite locales en `app/core.py` y `app/store.py`. La implementación usa IDs `f1`, `f2`, etc. dentro de cada entidad y un schema JSON versionado. Es una simplificación de V0 frente a los IDs opacos y PostgreSQL/JSONB propuestos antes. Ver DECISIONS.md, R-004.
+Contrato de diseño adoptado para V0 el 2026-09-04. Desde 2026-10-12 hay un validador y tablas SQLite locales en `app/core.py` y `app/store.py`. La implementación usa IDs `f1`, `f2`, etc. dentro de cada entidad y un schema JSON versionado. Desde 2026-10-13 también permite revisiones de módulos y reimportación controlada. Es una simplificación frente a los IDs opacos y PostgreSQL/JSONB propuestos antes. Ver DECISIONS.md, R-004.
 
 ## Application Schema
 
@@ -93,9 +93,11 @@ Teléfono, email y porcentaje podrán evolucionar hacia formatos semánticos esp
 | Registro | Identificador, organización, entidad, datos JSONB y fechas de creación/modificación |
 | Importación | Identificador, organización, aplicación, estado, schema confirmado, mapeo, conteos y errores |
 
-La implementación actual contiene `organizations`, `users`, `memberships`, `sessions`, `modules`, `records`, `imports` y `pending_uploads` en SQLite; `schema_json` y `values_json` almacenan JSON en columnas de texto. `modules` e `imports` tienen `organization_id`; los registros se consultan a través del módulo de la organización activa. No hay una tabla separada de aplicaciones. Los datos dinámicos se validan en el servidor antes de persistir. Los módulos heredados de V0 se migran a la organización inicial.
+La implementación actual contiene `organizations`, `users`, `memberships`, `sessions`, `modules`, `records`, `imports`, `pending_uploads`, `reimports`, `reimport_changes`, `saved_views`, `audit_events` y `access_tokens` en SQLite; `schema_json` y `values_json` almacenan JSON en columnas de texto. `modules` e `imports` tienen `organization_id`; los registros se consultan a través del módulo de la organización activa. No hay una tabla separada de aplicaciones. Los datos dinámicos se validan en el servidor antes de persistir. Los módulos heredados de V0 se migran a la organización inicial.
 
-Las fechas de creación y modificación no constituyen un historial de auditoría completo. La auditoría detallada queda fuera de V0.
+`audit_events` conserva acciones y actor, sin guardar valores completos de los registros. `reimport_changes` guarda los valores anteriores y nuevos de cada cambio para permitir deshacer; esa información forma parte de la base y de sus backups. Las vistas se guardan por usuario y módulo. Los tokens de invitación y recuperación solo se guardan como hashes y tienen vencimiento.
+
+La edición de un módulo incrementa `revision` y conserva los IDs de sus campos. Permite cambiar etiquetas, obligatoriedad y opciones, o agregar campos opcionales; valida todos los registros antes de confirmar en una transacción. Conserva `sourceLabel` para reconocer encabezados de Excel después de renombrar un campo. La reimportación requiere la misma estructura de columnas importadas, una clave no vacía y única, y una vista previa confirmada. No elimina filas ausentes. El deshacer se niega cuando alguno de los registros afectados cambió después.
 
 ## Validación y consultas
 
@@ -103,7 +105,7 @@ El schema se valida antes de persistirse. Los registros se validan en servidor t
 
 La búsqueda y los filtros se construyen a partir de campos y operadores permitidos por tipo. Los índices iniciales cubrirán los vínculos relacionales; agregar índices JSONB o por campo solo si las mediciones lo justifican.
 
-La unicidad de un ID de negocio no se infiere ni se garantiza automáticamente en V0. Las relaciones entre entidades corresponden a V2.
+La unicidad de un ID de negocio no se infiere ni se garantiza globalmente en V0. En cada reimportación el usuario elige una columna identificadora y se rechazan claves duplicadas en el archivo o el módulo. Las relaciones entre entidades corresponden a V2.
 
 ## Ciclo de importación propuesto
 

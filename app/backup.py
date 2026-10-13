@@ -48,6 +48,16 @@ def prune(days):
         if path.stat().st_mtime<cutoff: path.unlink()
 
 
+def backup_status(max_age_hours=36):
+    files=sorted(BACKUP_DIR.glob("tablio-*.sqlite3"),key=lambda p:p.stat().st_mtime,reverse=True) if BACKUP_DIR.exists() else []
+    if not files: return {"ok":False,"message":"No hay copias de seguridad."}
+    latest=files[0]
+    age_hours=(time.time()-latest.stat().st_mtime)/3600
+    if age_hours>max_age_hours: return {"ok":False,"message":"La última copia es demasiado antigua.","path":str(latest),"ageHours":round(age_hours,1)}
+    if not verify_backup(latest): return {"ok":False,"message":"La última copia no es íntegra.","path":str(latest)}
+    return {"ok":True,"message":"La última copia es reciente e íntegra.","path":str(latest),"ageHours":round(age_hours,1)}
+
+
 def restore_backup(path):
     if not verify_backup(path): raise ValueError("Backup inválido; no se restauró la base.")
     store.DB_PATH.parent.mkdir(parents=True,exist_ok=True)
@@ -67,13 +77,19 @@ def restore_backup(path):
 
 def main():
     parser=argparse.ArgumentParser(description="Copias de seguridad de Tablio")
-    parser.add_argument("command",choices=("create","verify","loop","restore"))
+    parser.add_argument("command",choices=("create","verify","loop","restore","status"))
     parser.add_argument("path",nargs="?")
     parser.add_argument("--retention-days",type=int,default=30)
     parser.add_argument("--interval-hours",type=float,default=24)
+    parser.add_argument("--max-age-hours",type=float,default=36)
     parser.add_argument("--force",action="store_true")
     args=parser.parse_args()
-    if args.command=="verify":
+    if args.command=="status":
+        import json
+        result=backup_status(args.max_age_hours)
+        print(json.dumps(result,ensure_ascii=False))
+        if not result["ok"]: raise SystemExit(1)
+    elif args.command=="verify":
         if not args.path: parser.error("verify requiere una ruta")
         if not verify_backup(args.path): raise SystemExit("Backup inválido.")
         print("Backup íntegro.")

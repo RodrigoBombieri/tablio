@@ -175,4 +175,14 @@ Se agregan copias online de SQLite con verificación de integridad y restauraci�
 
 ## Cómo registrar cambios futuros
 
+### R-007 — Reimportación conservadora y configuración posterior
+
+**Fecha:** 2026-10-13. **Estado:** implementada por pedido explícito del usuario.
+
+La actualización desde otro XLSX requiere elegir una columna identificadora no vacía y única. Tablio muestra altas, cambios y filas sin cambios antes de guardar. Las filas ausentes del archivo no se eliminan. La confirmación verifica que el resultado sigue siendo el revisado y aplica todo en una transacción; el historial permite deshacer mientras los registros afectados mantengan los valores aplicados. Esta elección evita que una planilla parcial borre registros por accidente. Por ahora el archivo actualizado debe conservar la estructura de columnas importadas; los campos añadidos manualmente se preservan en registros existentes.
+
+La revisión de importación permite corregir celdas y fórmulas antes de guardar. Los campos existentes pueden renombrarse o marcarse obligatorios tras validar todos los registros; los campos nuevos se agregan como opcionales y se pueden marcar obligatorios una vez completos. Vistas personales y consultas paginadas en SQLite mejoran el trabajo diario. Se añadieron bitácora de acciones, invitaciones y recuperación por enlace de un solo uso, con entrega manual del enlace. El estilo usa controles más grandes y mensajes directos, pendiente de validación con personas usuarias.
+
+La copia externa cifrada y el despliegue HTTPS real siguen pendientes de infraestructura; no se los considera completados por la configuración local.
+
 Agregar una entrada con fecha, estado, contexto, decisión, alternativas y consecuencias. Si reemplaza otra, referenciar su ID y actualizar PROJECT.md, PLANNING.md, ARCHITECTURE.md o DATA_MODEL.md según corresponda. No cambiar silenciosamente una definición del brief.

@@ -33,7 +33,11 @@ Luego abrí el sitio y cambiá la contraseña inicial desde la interfaz si fue g
 
 Cada usuario puede pertenecer a varias organizaciones. La interfaz permite elegir la activa; el servidor comprueba la membresía en cada solicitud. Los módulos, registros e importaciones se consultan con `organization_id`. Una URL o identificador de otra organización no concede acceso. Solo el propietario puede crear usuarios, agregarlos a su organización, cambiar roles o quitar membresías. Un cambio de rol o retiro invalida las sesiones del usuario. No se puede retirar al propietario desde la interfaz.
 
-Las sesiones duran 12 horas y usan una cookie `HttpOnly`, `SameSite=Strict`; en HTTPS llevan también `Secure`. Cada escritura exige un token CSRF. Las contraseñas se guardan con PBKDF2-SHA256, sal aleatoria y 600.000 iteraciones. El servidor limita los intentos de login por dirección y email. El cambio de contraseña invalida todas las sesiones del usuario. La app no incluye aún recuperación de cuenta por email, auditoría detallada ni segundo factor; necesitaremos definirlos antes de tratarla como servicio público completo.
+Las sesiones duran 12 horas y usan una cookie `HttpOnly`, `SameSite=Strict`; en HTTPS llevan también `Secure`. Cada escritura autenticada exige un token CSRF. Las contraseñas se guardan con PBKDF2-SHA256, sal aleatoria y 600.000 iteraciones. El servidor limita los intentos de login por dirección y email. El cambio de contraseña invalida todas las sesiones del usuario.
+
+El propietario puede crear una invitación para una persona nueva o una cuenta ya existente. El enlace se muestra una sola vez, vence a los siete días y debe compartirse por un canal privado elegido por el propietario; Tablio todavía no envía correos. Para una cuenta existente se pide la contraseña actual antes de agregar la organización. El propietario también puede generar un enlace de recuperación para cualquier integrante, incluso para sí mismo si conserva una sesión abierta. Ese enlace vence en una hora, se usa una vez y revoca las sesiones al cambiar la contraseña. Si el único propietario pierde toda sesión y su contraseña, un operador con acceso al servidor puede ejecutar `python -m app.recover --email vos@ejemplo.com --base-url https://tu-dominio` para emitir un enlace de emergencia. No hay autoservicio por email. Los enlaces llevan el token en el fragmento `#` de la URL para evitar enviarlo al servidor al cargar la página. No compartas ni registres estos enlaces públicamente.
+
+La vista **Actividad** está disponible para propietarios y administradores y muestra cambios de registros, importaciones, configuración, membresías y accesos. Es una bitácora básica; aún faltan políticas de retención, exportación, monitoreo de anomalías y revisión de seguridad antes de operar como servicio público completo. No hay segundo factor.
 
 Los XLSX pendientes se guardan fuera de `web/`, con token aleatorio, usuario y organización asociados. Se eliminan al importar o al vencer 24 horas después. En Linux, las carpetas privadas y la base usan permisos de propietario; en Docker están en un volumen privado no publicado. No incluyas `data/`, `uploads/`, `backups/` ni `.env` en Git.
 
@@ -44,9 +48,10 @@ La copia usa la API de backup online de SQLite y se comprueba con `PRAGMA integr
 ```powershell
 python -m app.backup create
 python -m app.backup verify "backups/tablio-AAAAMMDDTHHMMSSZ-XXXXXXXX.sqlite3"
+python -m app.backup status --max-age-hours 36
 ```
 
-En Docker, el servicio `backup` crea una copia al iniciar y luego cada 24 horas. Conserva 30 días en un volumen separado de la base. Esto protege contra fallos de la base y errores operativos locales, pero **no contra la pérdida del servidor**. Copiá y cifrá periódicamente las copias fuera de esa máquina y probá una restauración de forma programada. Las copias contienen usuarios y datos de todas las organizaciones; solo operadores autorizados deben acceder a ellas.
+En Docker, el servicio `backup` crea una copia al iniciar y luego cada 24 horas. Conserva 30 días en un volumen separado de la base. El comando `status` y el healthcheck del servicio comprueban que la última copia tenga menos de 36 horas y pase `integrity_check`. Esto protege contra fallos de la base y errores operativos locales, pero **no contra la pérdida del servidor**. Todavía falta elegir un destino externo, cifrar las copias antes de enviarlas, automatizar el traslado y probar una restauración desde ese destino. Las copias contienen usuarios y datos de todas las organizaciones; solo operadores autorizados deben acceder a ellas.
 
 Para restaurar en local, detené Tablio y ejecutá:
 

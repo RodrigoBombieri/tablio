@@ -16,8 +16,9 @@ from pathlib import Path
 from http.cookies import SimpleCookie
 from urllib.parse import parse_qs, urlparse
 
-from .core import convert_rows, infer_sheet, validate_record, validate_schema
+from .core import convert_rows, infer_sheet, validate_record, validate_schema, _normalize
 from . import store
+from .reimport import plan as plan_reimport
 from .store import (create_record, delete_record, get_module, import_records,
                     initialize, module_list, record_list, update_record)
 from .xlsx_io import SpreadsheetError, read_workbook, write_workbook
@@ -56,6 +57,79 @@ def _preview(token, sheet_name, org_id, user_id):
     result["sample"] = [{"row": r["number"], "values": [r["cells"].get(f["sourceColumn"]) for f in result["fields"]]}
                         for r in sheet["rows"][1:6]]
     return result, sheet
+
+
+def _correct_sheet(sheet, preview, body):
+    formula_corrections=body.get("formulaCorrections",{})
+    data_corrections=body.get("dataCorrections",{})
+    if not isinstance(formula_corrections,dict) or not isinstance(data_corrections,dict) or len(formula_corrections)+len(data_corrections)>1000:
+        raise ValueError("Hay demasiadas correcciones.")
+    rows={r["number"]:r for r in sheet["rows"][1:]}
+    for corrections,is_formula in ((formula_corrections,True),(data_corrections,False)):
+        for coordinate,value in corrections.items():
+            match=re.fullmatch(r"([1-9]\d*):([1-9]\d*)",coordinate)
+            if not match or not isinstance(value,str) or len(value)>500:
+                raise ValueError("Corrección de celda inválida.")
+            row_number,column=map(int,match.groups())
+            row=rows.get(row_number)
+            if not row or column>len(preview["fields"]): raise ValueError("La celda corregida no pertenece a la tabla.")
+            old=row["cells"].get(column-1)
+            if is_formula:
+                if not isinstance(old,dict) or not value.startswith("="):
+                    raise ValueError("Corrección de fórmula inválida.")
+                row["cells"][column-1]={"formula":value,"cached":None}
+            else:
+                if isinstance(old,dict):
+                    raise ValueError("Las fórmulas deben corregirse en la lista de fórmulas.")
+                row["cells"][column-1]=value
+    return sheet
+
+
+def _annotate_formula_errors(errors,sheet):
+    rows={r["number"]:r for r in sheet["rows"][1:]}
+    for issue in errors:
+        if issue["code"]!="INVALID_FORMULA" or not issue["column"]: continue
+        cell=rows.get(issue["row"],{}).get("cells",{}).get(issue["column"]-1)
+        if isinstance(cell,dict) and "formula" in cell: issue["formula"]=cell["formula"]
+    return errors
+
+
+def _review_import(preview,sheet,body):
+    _correct_sheet(sheet,preview,body)
+    schema=validate_schema(body.get("schema",{}),infer_sheet(sheet))
+    records,errors=convert_rows(sheet,schema)
+    _annotate_formula_errors(errors,sheet)
+    sample=[{"row":row["number"],"values":record} for row,record in zip(
+        (r for r in sheet["rows"][1:] if any(_normalize(v) is not None for v in r["cells"].values())),records)][:20]
+    return schema,records,errors,sample
+
+
+def _review_reimport(preview,sheet,module,body,org_id,token):
+    _correct_sheet(sheet,preview,body)
+    schema=module["schema"]
+    imported=[f for f in schema["fields"] if f.get("sourceColumn") is not None]
+    headers=sheet["rows"][0]["cells"]
+    for field in imported:
+        if str(headers.get(field["sourceColumn"],"")).strip().casefold()!=field.get("sourceLabel",field["label"]).casefold():
+            raise ValueError(f"La columna {field['sourceColumn']+1} debe ser {field.get('sourceLabel',field['label'])}. Usá un archivo con la misma estructura.")
+    key_field=body.get("keyFieldId")
+    if key_field not in {f["id"] for f in imported if not f.get("formula")}:
+        raise ValueError("Elegí una columna identificadora del archivo.")
+    converted,errors=convert_rows(sheet,{"fields":imported})
+    _annotate_formula_errors(errors,sheet)
+    rows=[r for r in sheet["rows"][1:] if any(_normalize(v) is not None for v in r["cells"].values())]
+    incoming=[]
+    if not errors:
+        for row,values in zip(rows,converted):
+            merged={f["id"]:values.get(f["id"]) if f in imported else None for f in schema["fields"]}
+            incoming.append({"row":row["number"],"values":merged})
+    result=plan_reimport(store.record_list(org_id,module["id"]),incoming,key_field,token,{f["id"] for f in imported}) if not errors else None
+    if result and not result["conflicts"]:
+        for change in result["changes"]:
+            try: validate_record(change["new"],schema)
+            except ValueError as exc:
+                errors.append({"code":"INVALID_VALUE","message":str(exc),"row":change["row"],"column":None,"field":"Registro"})
+    return errors,result
 
 
 def filter_records(records, schema, query):
@@ -169,6 +243,12 @@ class Handler(BaseHTTPRequestHandler):
                 token,csrf,user_id=result
                 return self._json({"csrfToken":csrf,"user":{"id":user_id},"organizations":store.memberships(user_id)},
                                   headers={"Set-Cookie":self._cookie(token)})
+            if self.command == "POST" and path == "/api/access-token":
+                info=store.access_token_info(self._request_json().get("token"))
+                return self._json(info if info else {"error":"El enlace venció o ya se usó."},200 if info else 404)
+            if self.command == "POST" and path == "/api/redeem-token":
+                body=self._request_json()
+                return self._json({"kind":store.redeem_access_token(body.get("token"),body.get("password"))})
             user=self._principal()
             if self.command == "GET" and path == "/api/me":
                 return self._json({"user":{"id":user["id"],"email":user["email"],"name":user["name"]},
@@ -190,17 +270,31 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/users" and self.command == "POST":
                 self._require_owner(role)
                 body=self._request_json()
-                user_id=store.create_user_in_org(org_id,body.get("email"),body.get("name"),body.get("password"),body.get("role"))
+                user_id=store.create_user_in_org(org_id,body.get("email"),body.get("name"),body.get("password"),body.get("role"),user["id"])
                 return self._json({"id":user_id},201)
+            if path == "/api/invitations" and self.command == "POST":
+                self._require_owner(role)
+                body=self._request_json()
+                token=store.create_invitation(org_id,body.get("email"),body.get("name"),body.get("role"),user["id"])
+                return self._json({"token":token,"expiresInDays":7},201)
+            if path == "/api/password-resets" and self.command == "POST":
+                self._require_owner(role)
+                token=store.create_reset_token(org_id,self._request_json().get("email"),user["id"])
+                return self._json({"token":token,"expiresInHours":1},201)
+            if path == "/api/activity" and self.command == "GET":
+                if role not in store.MANAGE_ROLES: raise PermissionError("No tenés permiso para ver la actividad.")
+                mid=query.get("moduleId",[None])[0]
+                if mid and not get_module(org_id,mid): return self._json({"error":"Módulo no encontrado."},404)
+                return self._json(store.activity(org_id,mid))
             if path == "/api/memberships" and self.command == "POST":
                 self._require_owner(role)
                 body=self._request_json()
-                user_id=store.add_membership(org_id,body.get("email"),body.get("role"))
+                user_id=store.add_membership(org_id,body.get("email"),body.get("role"),user["id"])
                 return self._json({"id":user_id},201)
             member=re.fullmatch(r"/api/users/([a-f0-9-]{36})",path)
             if member and self.command == "PUT":
                 self._require_owner(role)
-                changed=store.set_membership(org_id,member.group(1),self._request_json().get("role"))
+                changed=store.set_membership(org_id,member.group(1),self._request_json().get("role"),user["id"])
                 return self._json({"updated":changed},200 if changed else 404)
             if member and self.command == "DELETE":
                 self._require_owner(role)
@@ -224,6 +318,41 @@ class Handler(BaseHTTPRequestHandler):
             if not re.fullmatch(r"[a-f0-9-]{36}", token): raise ValueError("Importación inválida.")
             result, _ = _preview(token, query.get("sheet", [""])[0],org_id,user["id"])
             return self._json(result)
+        if self.command == "POST" and path == "/api/import/validate":
+            self._require_write(role)
+            body=self._request_json()
+            token=body.get("token","")
+            if not isinstance(token,str) or not re.fullmatch(r"[a-f0-9-]{36}",token): raise ValueError("Importación inválida.")
+            preview,sheet=_preview(token,body.get("sheet"),org_id,user["id"])
+            _,records,errors,sample=_review_import(preview,sheet,body)
+            return self._json({"rowCount":len(records),"errors":errors[:100],"errorCount":len(errors),"sample":sample})
+        if self.command == "POST" and path in ("/api/reimport/preview","/api/reimport/confirm"):
+            self._require_write(role)
+            body=self._request_json()
+            token=body.get("token","")
+            mid=body.get("moduleId","")
+            if not isinstance(token,str) or not re.fullmatch(r"[a-f0-9-]{36}",token) or not isinstance(mid,str) or not re.fullmatch(r"[a-f0-9-]{36}",mid):
+                raise ValueError("Reimportación inválida.")
+            if path.endswith("/confirm"):
+                done=store.reimport_run(org_id,token)
+                if done:
+                    if done["module_id"]!=mid: raise ValueError("La importación pertenece a otro módulo.")
+                    return self._json({"moduleId":mid,"runId":token,"alreadyImported":True})
+            module=get_module(org_id,mid)
+            if not module: return self._json({"error":"Módulo no encontrado."},404)
+            preview,sheet=_preview(token,body.get("sheet"),org_id,user["id"])
+            errors,result=_review_reimport(preview,sheet,module,body,org_id,token)
+            if errors: return self._json({"errors":errors[:100],"errorCount":len(errors)},422)
+            if result["conflicts"]: return self._json({"conflicts":result["conflicts"][:100],"conflictCount":len(result["conflicts"])},422)
+            if path.endswith("/preview"):
+                return self._json({"created":result["created"],"updated":result["updated"],"unchanged":result["unchanged"],
+                                   "changes":[{"action":c["action"],"row":c["row"],"key":c["key"],"old":c["old"],"new":c["new"]} for c in result["changes"][:20]],"digest":result["digest"]})
+            if body.get("digest")!=result["digest"]:
+                raise ValueError("La vista previa cambió. Revisá los cambios nuevamente.")
+            store.apply_reimport(org_id,mid,token,user["id"],body["keyFieldId"],result["changes"])
+            (UPLOADS / f"{token}.xlsx").unlink(missing_ok=True)
+            store.finish_upload(token,org_id,user["id"])
+            return self._json({"moduleId":mid,"runId":token,"created":result["created"],"updated":result["updated"],"unchanged":result["unchanged"]})
         if self.command == "POST" and path == "/api/import":
             self._require_write(role)
             body = self._request_json()
@@ -238,35 +367,43 @@ class Handler(BaseHTTPRequestHandler):
                 module_id = store.imported_module(org_id,token)
                 if module_id: return self._json({"moduleId": module_id, "alreadyImported": True})
                 raise
-            corrections = body.get("formulaCorrections", {})
-            if not isinstance(corrections, dict) or len(corrections) > 1000:
-                raise ValueError("Correcciones de fórmulas inválidas.")
-            issue_keys = {f"{issue['row']}:{issue['column']}" for issue in preview["formulaIssues"]}
-            for key, formula in corrections.items():
-                if key not in issue_keys or not isinstance(formula, str) or not formula.startswith("=") or len(formula) > 500:
-                    raise ValueError("Corrección de fórmula inválida.")
-                row_number, column = map(int, key.split(":"))
-                row = next(r for r in sheet["rows"] if r["number"] == row_number)
-                row["cells"][column-1] = {"formula": formula, "cached": None}
-            schema = validate_schema(body.get("schema", {}), infer_sheet(sheet))
-            records, errors = convert_rows(sheet, schema)
+            schema,records,errors,_=_review_import(preview,sheet,body)
             if errors: return self._json({"errors": errors[:100], "errorCount": len(errors)}, 422)
-            module_id = import_records(org_id,token, schema, records)
+            module_id = import_records(org_id,token, schema, records,user["id"])
             (UPLOADS / f"{token}.xlsx").unlink(missing_ok=True)
             store.finish_upload(token,org_id,user["id"])
             return self._json({"moduleId": module_id, "count": len(records)})
-        match = re.fullmatch(r"/api/modules/([a-f0-9-]{36})(?:/(records|export)(?:/([a-f0-9-]{36}))?)?", path)
+        match = re.fullmatch(r"/api/modules/([a-f0-9-]{36})(?:/(records|export|reimports|views)(?:/([a-f0-9-]{36}))?)?", path)
         if match:
             mid, action, rid = match.groups()
             module = get_module(org_id,mid)
             if not module: return self._json({"error": "Módulo no encontrado."}, 404)
             schema = module["schema"]
             if self.command == "GET" and not action: return self._json(module)
+            if self.command == "PUT" and not action:
+                self._require_write(role)
+                updated=store.update_module_schema(org_id,mid,self._request_json(),user["id"])
+                return self._json({"id":mid,"schema":updated})
+            if action == "views" and self.command == "GET" and not rid:
+                return self._json(store.saved_views(org_id,mid,user["id"]))
+            if action == "views" and self.command == "POST" and not rid:
+                body=self._request_json();view_query=body.get("query")
+                if not isinstance(view_query,dict): raise ValueError("Vista inválida.")
+                if not isinstance(view_query.get("columns",[]),list) or any(fid not in {f["id"] for f in schema["fields"]} for fid in view_query.get("columns",[])):
+                    raise ValueError("Columnas de la vista inválidas.")
+                store.query_records(org_id,mid,schema,{k:[str(v)] for k,v in view_query.items() if k!="columns"})
+                return self._json({"id":store.save_view(org_id,mid,user["id"],body.get("name"),view_query)},201)
+            if action == "views" and self.command == "DELETE" and rid:
+                if not store.delete_view(org_id,mid,user["id"],rid): return self._json({"error":"Vista no encontrada."},404)
+                return self._json({"deleted":True})
+            if self.command == "GET" and action == "reimports" and not rid:
+                return self._json(store.reimport_history(org_id,mid))
+            if self.command == "POST" and action == "reimports" and rid:
+                self._require_write(role)
+                if not store.undo_reimport(org_id,mid,rid,user["id"]): return self._json({"error":"Reimportación no encontrada."},404)
+                return self._json({"undone":True})
             if self.command == "GET" and action == "records":
-                records = filter_records(record_list(org_id,mid), schema, query)
-                try: page = max(1, int(query.get("page", ["1"])[0]))
-                except ValueError: page = 1
-                return self._json({"total": len(records), "page": page, "items": records[(page-1)*25:page*25]})
+                return self._json(store.query_records(org_id,mid,schema,query))
             if self.command == "GET" and action == "export":
                 records = record_list(org_id,mid)
                 headers = [f["label"] for f in schema["fields"]]
@@ -282,13 +419,13 @@ class Handler(BaseHTTPRequestHandler):
             if action == "records" and self.command in ("POST", "PUT"):
                 self._require_write(role)
                 values = validate_record(self._request_json().get("values"), schema)
-                if self.command == "POST" and not rid: return self._json({"id": create_record(org_id,mid, values)}, 201)
+                if self.command == "POST" and not rid: return self._json({"id": create_record(org_id,mid, values,user["id"])}, 201)
                 if self.command == "PUT" and rid:
-                    if not update_record(org_id,mid, rid, values): return self._json({"error": "Registro no encontrado."}, 404)
+                    if not update_record(org_id,mid, rid, values,user["id"]): return self._json({"error": "Registro no encontrado."}, 404)
                     return self._json({"id": rid})
             if action == "records" and self.command == "DELETE" and rid:
                 self._require_write(role)
-                if not delete_record(org_id,mid, rid): return self._json({"error": "Registro no encontrado."}, 404)
+                if not delete_record(org_id,mid, rid,user["id"]): return self._json({"error": "Registro no encontrado."}, 404)
                 return self._json({"deleted": True})
         if path.startswith("/api/"):
             return self._json({"error": "Ruta no encontrada."}, 404)

@@ -33,8 +33,11 @@ Si el puerto 8000 está ocupado, configurá `TABLIO_PORT` antes de iniciar el se
 1. Seleccioná **Importar una planilla**.
 2. Elegí [minimercado.xlsx](outputs/01a06e97-c8d6-7c20-aebd-4c816513d8af/minimercado.xlsx) o [corralon_materiales.xlsx](outputs/01a06e97-c8d6-7c20-aebd-4c816513d8af/corralon_materiales.xlsx).
 3. Revisá los tipos de campo. Para categorías, rubros, unidad y estado, podés seleccionar **Opciones** y confirmar la lista separada por comas.
-4. Si la planilla tiene fórmulas con errores, corregilas en la lista por fila y columna antes de confirmar. Se admiten operaciones `+`, `-`, `*`, `/`, paréntesis y referencias de la misma fila, incluidas referencias de tabla.
-5. Confirmá la importación. Luego probá búsqueda, filtros, paginación, edición y exportación. Los campos calculados se actualizan al editar sus entradas y se exportan como fórmulas.
+4. Elegí **Comprobar datos**. Si hay celdas o fórmulas con errores, corregilas por fila y campo desde la misma pantalla y repetí la comprobación. Se admiten operaciones `+`, `-`, `*`, `/`, paréntesis y referencias de la misma fila, incluidas referencias de tabla.
+5. Guardá el módulo. Luego probá búsqueda, filtros, orden, columnas visibles, vistas guardadas, edición y exportación. Los campos calculados se actualizan al editar sus entradas y se exportan como fórmulas.
+6. Desde el módulo, elegí **Actualizar desde Excel**, indicá la columna que identifica cada registro y revisá cuántos se agregarán o cambiarán. Las filas ausentes del archivo quedan intactas. **Historial** permite deshacer una actualización si esos registros no se editaron después.
+
+**Configurar campos** permite cambiar nombres, marcar campos obligatorios y agregar otros opcionales. La sección **Usuarios** permite invitar personas con un enlace privado o generar un enlace para recuperar el acceso. Propietarios y administradores pueden consultar **Actividad**.
 
 Los datos de prueba son sintéticos. La [guía de los dos XLSX](docs/FIXTURES.md) indica sus columnas y valores especiales.
 

@@ -2,7 +2,7 @@
 
 ## Fuente y estado
 
-Fuente de verdad: [Project Brief](../Tablio%20%E2%80%94%20Project%20Brief.md). Estado: PoC local V0 implementado. El alcance se adoptó como base de trabajo mediante R-002 y el stack local se decidió en R-004 de DECISIONS.md. Datasets vigentes: [FIXTURES.md](FIXTURES.md).
+Fuente de verdad: [Project Brief](../Tablio%20%E2%80%94%20Project%20Brief.md). Estado: PoC local V0 implementado y ampliado con funciones iniciales de MVP. El alcance se adoptó mediante R-002 y el stack local se decidió en R-004 de DECISIONS.md. Datasets vigentes: [FIXTURES.md](FIXTURES.md).
 
 ## Visión
 
@@ -36,7 +36,7 @@ Una planilla simple puede convertirse en una aplicación útil sin desarrollar p
 
 Flujo propuesto: subir Excel → interpretar → corregir y confirmar → importar → consultar y editar → exportar.
 
-## Alcance propuesto de V0
+## Alcance propuesto de V0 (referencia histórica)
 
 | Área | Alcance |
 |---|---|
@@ -54,9 +54,13 @@ Casos vigentes por solicitud del usuario: inventarios ficticios de un minimercad
 
 Se propone incluir exportación en V0 para verificar la recuperación de datos, aunque excede el recorrido mínimo del PoC del brief.
 
+## Funciones añadidas después de V0
+
+La app actual ya incluye usuarios, roles y organizaciones, fórmulas aritméticas simples, reimportación incremental con vista previa y deshacer condicionado, corrección de datos antes de guardar, configuración posterior de campos, vistas personales, actividad e invitaciones. Los cambios de reimportación conservan los registros ausentes del XLSX. La interfaz usa etiquetas directas y controles más legibles; falta validarla con personas usuarias de distintas edades. Ver PLANNING.md y DECISIONS.md, R-005 a R-007.
+
 ## Fuera de V0
 
-Relaciones entre entidades, fórmulas avanzadas o entre hojas, dashboards, IA, sincronización con Excel, importaciones incrementales, cambios de estructura posteriores a la importación, personalización visual avanzada, usuarios y roles operativos de producción. V0 admite el subconjunto aritmético de la misma fila definido en DECISIONS.md, R-005.
+Relaciones entre entidades, fórmulas avanzadas o entre hojas, dashboards, IA, sincronización bidireccional continua con Excel y personalización visual avanzada. Las funciones añadidas después de V0 no sustituyen la validación con planillas y personas reales ni la preparación operativa de un servicio público.
 
 ## Diferencia con el MVP
 

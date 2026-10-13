@@ -179,6 +179,7 @@ class AppTests(unittest.TestCase):
             path=backup.create_backup()
             self.assertTrue(backup.verify_backup(path))
             self.assertGreater(path.stat().st_size,0)
+            self.assertTrue(backup.backup_status()['ok'])
         finally:
             backup.BACKUP_DIR=previous
 
@@ -289,6 +290,127 @@ class AppTests(unittest.TestCase):
         self.assertEqual(status,200,result)
         _,data=self.request(f"/api/modules/{result['moduleId']}/records")
         self.assertEqual(data['items'][1]['values']['f2'],'400.000000')
+
+    def test_reimport_preview_commit_undo_and_duplicate_guard(self):
+        schema={'schemaVersion':1,'revision':1,'name':'Actualizable','primaryFieldId':'f1','fields':[
+            {'id':'f1','label':'Codigo','type':'text','required':True,'sourceColumn':0},
+            {'id':'f2','label':'Nombre','type':'text','required':False,'sourceColumn':1}]}
+        mid=store.import_records(self.org_id,str(__import__('uuid').uuid4()),schema,[{'f1':'A','f2':'Antes'},{'f1':'B','f2':'Queda'}])
+        raw=write_workbook('Actualizable',['Codigo','Nombre'],[['A','Después'],['C','Nuevo']])
+        status,upload=self.request('/api/analyze','POST',raw,'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        self.assertEqual(status,200,upload)
+        body={'token':upload['token'],'sheet':upload['sheet'],'moduleId':mid,'keyFieldId':'f1'}
+        status,preview=self.request('/api/reimport/preview','POST',body)
+        self.assertEqual(status,200,preview)
+        self.assertEqual((preview['created'],preview['updated'],preview['unchanged']),(1,1,0))
+        body['digest']=preview['digest']
+        status,done=self.request('/api/reimport/confirm','POST',body)
+        self.assertEqual(status,200,done)
+        status,retry=self.request('/api/reimport/confirm','POST',body)
+        self.assertEqual(status,200,retry)
+        self.assertTrue(retry['alreadyImported'])
+        values={r['values']['f1']:r['values']['f2'] for r in store.record_list(self.org_id,mid)}
+        self.assertEqual(values,{'A':'Después','B':'Queda','C':'Nuevo'})
+        status,history=self.request(f'/api/modules/{mid}/reimports')
+        self.assertEqual((status,history[0]['created'],history[0]['updated']),(200,1,1))
+        status,undone=self.request(f"/api/modules/{mid}/reimports/{done['runId']}",'POST',{})
+        self.assertEqual(status,200,undone)
+        values={r['values']['f1']:r['values']['f2'] for r in store.record_list(self.org_id,mid)}
+        self.assertEqual(values,{'A':'Antes','B':'Queda'})
+        raw=write_workbook('Actualizable',['Codigo','Nombre'],[['A','Uno'],['A','Dos']])
+        _,upload=self.request('/api/analyze','POST',raw,'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        status,conflict=self.request('/api/reimport/preview','POST',{'token':upload['token'],'sheet':upload['sheet'],'moduleId':mid,'keyFieldId':'f1'})
+        self.assertEqual(status,422)
+        self.assertEqual(conflict['conflictCount'],1)
+
+    def test_reimport_rechecks_preview_and_denies_other_organization(self):
+        schema={'schemaVersion':1,'revision':1,'name':'Control','primaryFieldId':'f1','fields':[
+            {'id':'f1','label':'Codigo','type':'text','required':True,'sourceColumn':0},
+            {'id':'f2','label':'Nombre','type':'text','required':False,'sourceColumn':1}]}
+        mid=store.import_records(self.org_id,str(__import__('uuid').uuid4()),schema,[{'f1':'A','f2':'Original'}])
+        raw=write_workbook('Control',['Codigo','Nombre'],[['A','Nuevo']])
+        _,upload=self.request('/api/analyze','POST',raw,'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        body={'token':upload['token'],'sheet':'Control','moduleId':mid,'keyFieldId':'f1'}
+        status,preview=self.request('/api/reimport/preview','POST',body)
+        self.assertEqual(status,200,preview)
+        other=store.create_organization(self.owner_id,'Separada para importar')
+        status,_=self.request('/api/reimport/preview','POST',body,org=other)
+        self.assertEqual(status,404)
+        record=store.record_list(self.org_id,mid)[0]
+        store.update_record(self.org_id,mid,record['id'],{'f1':'A','f2':'Editado'})
+        status,_=self.request('/api/reimport/confirm','POST',{**body,'digest':preview['digest']})
+        self.assertEqual(status,400)
+        self.assertEqual(store.record_list(self.org_id,mid)[0]['values']['f2'],'Editado')
+
+    def test_import_data_correction_before_saving(self):
+        raw=write_workbook('Corregible',['Codigo','Saldo'],[['A','invalido']])
+        _,upload=self.request('/api/analyze','POST',raw,'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        schema={'schemaVersion':1,'name':'Corregible','primaryFieldId':'f1','fields':[
+            {'id':'f1','label':'Codigo','type':'text','required':True,'sourceColumn':0},
+            {'id':'f2','label':'Saldo','type':'currency','required':True,'scale':2,'sourceColumn':1}]}
+        body={'token':upload['token'],'sheet':upload['sheet'],'schema':schema}
+        status,review=self.request('/api/import/validate','POST',body)
+        self.assertEqual((status,review['errorCount']),(200,1))
+        body['dataCorrections']={'2:2':'12.50'}
+        status,review=self.request('/api/import/validate','POST',body)
+        self.assertEqual((status,review['errorCount'],review['sample'][0]['values']['f2']),(200,0,'12.50'))
+        status,done=self.request('/api/import','POST',body)
+        self.assertEqual(status,200,done)
+        self.assertEqual(store.record_list(self.org_id,done['moduleId'])[0]['values']['f2'],'12.50')
+
+    def test_configure_fields_saved_views_and_sql_pagination(self):
+        schema={'schemaVersion':1,'revision':1,'name':'Consulta','primaryFieldId':'f1','fields':[
+            {'id':'f1','label':'Codigo','type':'text','required':True,'sourceColumn':0},
+            {'id':'f2','label':'Precio','type':'currency','required':False,'scale':2,'sourceColumn':1}]}
+        mid=store.import_records(self.org_id,str(__import__('uuid').uuid4()),schema,[
+            {'f1':'A','f2':'10.00'},{'f1':'B','f2':'2.00'},{'f1':'C','f2':'100.00'}])
+        candidate={**schema,'name':'Productos','fields':[
+            {**schema['fields'][0],'label':'Código'},schema['fields'][1],
+            {'id':'f3','label':'Notas','type':'text','required':False,'sourceColumn':None}]}
+        status,updated=self.request(f'/api/modules/{mid}','PUT',candidate)
+        self.assertEqual(status,200,updated)
+        self.assertEqual(updated['schema']['revision'],2)
+        self.assertEqual(updated['schema']['fields'][0]['sourceLabel'],'Codigo')
+        self.assertIsNone(store.record_list(self.org_id,mid)[0]['values']['f3'])
+        status,sorted_rows=self.request(f'/api/modules/{mid}/records?sort=f2&direction=asc')
+        self.assertEqual((status,[r['values']['f1'] for r in sorted_rows['items']]),(200,['B','A','C']))
+        status,filtered=self.request(f'/api/modules/{mid}/records?field=f2&op=gt&value=9')
+        self.assertEqual((status,filtered['total']),(200,2))
+        status,saved=self.request(f'/api/modules/{mid}/views','POST',{'name':'Precios altos','query':{'field':'f2','op':'gt','value':'9','sort':'f2','direction':'desc','columns':['f1','f2']}})
+        self.assertEqual(status,201,saved)
+        status,views=self.request(f'/api/modules/{mid}/views')
+        self.assertEqual((status,len(views)),(200,1))
+        status,_=self.request(f"/api/modules/{mid}/views/{saved['id']}",'DELETE')
+        self.assertEqual(status,200)
+        status,bad=self.request(f'/api/modules/{mid}','PUT',candidate)
+        self.assertEqual(status,400)
+
+    def test_invitation_reset_and_activity_are_organization_scoped(self):
+        other=store.create_organization(self.owner_id,'Otra para accesos')
+        status,invite=self.request('/api/invitations','POST',{'email':'nuevo@tablio.test','name':'Nueva persona','role':'viewer'})
+        self.assertEqual(status,201,invite)
+        status,info=self.request('/api/access-token','POST',{'token':invite['token']},org=other,cookie='',csrf='')
+        self.assertEqual((status,info['kind'],info['existing']),(200,'invite',False))
+        status,redeemed=self.request('/api/redeem-token','POST',{'token':invite['token'],'password':'contraseña-segura-999'},org=other,cookie='',csrf='')
+        self.assertEqual((status,redeemed['kind']),(200,'invite'))
+        status,_=self.request('/api/redeem-token','POST',{'token':invite['token'],'password':'contraseña-segura-999'},org=other,cookie='',csrf='')
+        self.assertEqual(status,400)
+        token,csrf,user_id=store.authenticate('nuevo@tablio.test','contraseña-segura-999')
+        self.assertEqual(store.role_for(user_id,self.org_id),'viewer')
+        self.assertIsNone(store.role_for(user_id,other))
+        status,_=self.request('/api/activity',cookie='tablio_session='+token,csrf=csrf)
+        self.assertEqual(status,403)
+        status,events=self.request('/api/activity')
+        self.assertEqual(status,200)
+        self.assertIn('invitation_accepted',[event['action'] for event in events])
+        status,reset=self.request('/api/password-resets','POST',{'email':'nuevo@tablio.test'})
+        self.assertEqual(status,201,reset)
+        status,_=self.request('/api/redeem-token','POST',{'token':reset['token'],'password':'contraseña-cambiada-999'},cookie='',csrf='')
+        self.assertEqual(status,200)
+        self.assertIsNone(store.authenticate('nuevo@tablio.test','contraseña-segura-999'))
+        self.assertIsNotNone(store.authenticate('nuevo@tablio.test','contraseña-cambiada-999'))
+        status,_=self.request('/api/modules',cookie='tablio_session='+token,csrf=csrf)
+        self.assertEqual(status,401)
 
 
 if __name__=='__main__': unittest.main()

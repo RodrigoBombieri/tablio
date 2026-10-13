@@ -31,6 +31,12 @@ services:
     depends_on:
       app:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-m", "app.backup", "status", "--max-age-hours", "36"]
+      interval: 1h
+      timeout: 30s
+      retries: 2
+      start_period: 2m
   restore:
     build: .
     profiles: ["maintenance"]

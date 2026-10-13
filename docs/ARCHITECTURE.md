@@ -78,7 +78,7 @@ Referencias técnicas consultadas durante el diseño: [Next.js Route Handlers](h
 
 La confirmación referencia una importación y una versión concreta del schema revisado. La creación de la entidad y sus registros se ejecuta en una transacción. Un error impide publicar datos parciales.
 
-Reintentar una confirmación ya completada debe devolver su resultado sin insertar registros nuevos. Esto no equivale a detectar duplicados entre archivos ni a soportar importaciones incrementales.
+Reintentar una confirmación ya completada devuelve su resultado sin insertar registros nuevos. La reimportación posterior usa una columna identificadora elegida por el usuario: compara el XLSX con registros existentes, muestra altas y cambios, rechaza claves duplicadas y aplica la operación en una transacción. La confirmación exige el resumen exacto revisado; un cambio de datos obliga a obtener otra vista previa. El historial permite deshacer mientras ninguno de los registros afectados se haya modificado después.
 
 ## Seguridad y contexto de organización
 
