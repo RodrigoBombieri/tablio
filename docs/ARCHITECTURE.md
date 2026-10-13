@@ -82,9 +82,7 @@ Reintentar una confirmación ya completada debe devolver su resultado sin insert
 
 ## Seguridad y contexto de organización
 
-V0 se propone como entorno local, de un operador, con información ficticia o anonimizada y una organización preconfigurada. Sin login en esa modalidad; sin exposición pública como servicio.
-
-La asociación de los datos a una organización debe ser explícita desde el modelo. No constituye por sí sola aislamiento multi-tenant. El MVP requerirá autenticación, membresías, autorización en servidor y pruebas de acceso cruzado entre organizaciones.
+La implementación actual exige login y asigna roles por organización. Cada solicitud API valida sesión y membresía; las escrituras también validan CSRF. Las consultas de módulos, registros e importaciones se acotan por organización. Hay pruebas de acceso cruzado entre organizaciones y de permisos por rol. La infraestructura pública y la operación de producción siguen pendientes.
 
 En toda escritura, el servidor valida el registro contra el schema. Los filtros se limitan a campos y operadores conocidos, y las consultas usan parámetros. La interfaz no es una frontera de autorización.
 
@@ -92,6 +90,6 @@ En toda escritura, el servidor valida el registro contra el schema. Los filtros 
 
 Archivos temporales fuera de rutas públicas, identificados internamente y eliminados al finalizar o a las 24 horas de recepción. Ejecutar limpieza al iniciar la aplicación y antes de aceptar subidas. Límites de diseño: 5 MiB comprimidos y 50 MiB descomprimidos, además de 5.000 filas y 30 columnas. Verificar su costo de procesamiento antes de considerar demostrada esa capacidad.
 
-Ejecución de V0: `python -m app.server` en un equipo local, con SQLite en `data/`. Para un piloto posterior se requiere HTTPS, autenticación, base y almacenamiento privados, copias de seguridad y aislamiento entre organizaciones; los proveedores se definirán antes de usar datos reales.
+Ejecución local: `python -m app.server`, SQLite en `data/` y primer propietario creado por `python -m app.admin`. Docker Compose separa la app, el servicio de backup y Caddy. El proxy publicará HTTPS cuando exista un dominio y servidor; actualmente no hay despliegue. Ver SECURITY_DEPLOYMENT.md para configuración, restauración y tareas operativas pendientes.
 
 No se proponen microservicios, colas, generación de proyectos por cliente ni aplicaciones móviles nativas para V0.

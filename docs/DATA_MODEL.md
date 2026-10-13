@@ -93,7 +93,7 @@ Teléfono, email y porcentaje podrán evolucionar hacia formatos semánticos esp
 | Registro | Identificador, organización, entidad, datos JSONB y fechas de creación/modificación |
 | Importación | Identificador, organización, aplicación, estado, schema confirmado, mapeo, conteos y errores |
 
-La implementación V0 contiene `modules`, `records` e `imports` en SQLite; `schema_json` y `values_json` almacenan JSON en columnas de texto. No hay organizaciones ni aplicaciones separadas en la base local. La tabla anterior corresponde a un diseño posterior que requiere autenticación y aislamiento real. Los datos dinámicos se validan en el servidor antes de persistir.
+La implementación actual contiene `organizations`, `users`, `memberships`, `sessions`, `modules`, `records`, `imports` y `pending_uploads` en SQLite; `schema_json` y `values_json` almacenan JSON en columnas de texto. `modules` e `imports` tienen `organization_id`; los registros se consultan a través del módulo de la organización activa. No hay una tabla separada de aplicaciones. Los datos dinámicos se validan en el servidor antes de persistir. Los módulos heredados de V0 se migran a la organización inicial.
 
 Las fechas de creación y modificación no constituyen un historial de auditoría completo. La auditoría detallada queda fuera de V0.
 

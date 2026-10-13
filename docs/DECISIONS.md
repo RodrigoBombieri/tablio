@@ -165,6 +165,14 @@ Se admiten constantes numéricas, paréntesis, `+`, `-`, `*`, `/` y referencias 
 
 El análisis lista referencias rotas, expresiones incompatibles o diferentes de la fórmula de su columna. La persona puede corregir cada fórmula en la revisión; el servidor valida nuevamente todo antes de importar. Las fórmulas entre filas, funciones, referencias entre hojas y ciclos quedan fuera de este alcance. El libro aportado contiene un `#REF!` en Q2, que se muestra para corrección.
 
+### R-006 — Acceso, aislamiento y operación antes del piloto
+
+**Fecha:** 2026-10-12. **Estado:** decisión de implementación motivada por el pedido explícito del usuario.
+
+Se amplía la app local con usuarios, contraseñas PBKDF2-SHA256, sesiones en cookie HttpOnly, CSRF, roles por organización y aislamiento de módulos e importaciones en cada consulta del servidor. Los módulos de V0 se migran a una organización inicial que recibe el primer propietario creado por CLI. El registro público permanece cerrado.
+
+Se agregan copias online de SQLite con verificación de integridad y restauración manual. En Docker Compose, la base y los XLSX quedan en un volumen privado; las copias usan otro volumen. Caddy queda configurado para certificados y redirección HTTPS con un dominio real. No se realizó publicación porque el usuario aún no tiene dominio ni servidor. La configuración y las pruebas locales no acreditan por sí solas seguridad operativa para un servicio público; faltan copia externa, monitoreo, restauración periódica y revisión de infraestructura. El procedimiento está en SECURITY_DEPLOYMENT.md.
+
 ## Cómo registrar cambios futuros
 
 Agregar una entrada con fecha, estado, contexto, decisión, alternativas y consecuencias. Si reemplaza otra, referenciar su ID y actualizar PROJECT.md, PLANNING.md, ARCHITECTURE.md o DATA_MODEL.md según corresponda. No cambiar silenciosamente una definición del brief.

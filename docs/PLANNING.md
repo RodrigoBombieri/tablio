@@ -2,7 +2,7 @@
 
 ## Estado
 
-V0 tiene un flujo local ejecutable y pruebas automatizadas con las dos planillas sectoriales. Las fases 1 a 3 están implementadas para el formato controlado; la fase 4 tiene verificación de servidor y datos, con revisión visual de navegador y mediciones de capacidad aún pendientes. El stack local y sus diferencias frente a la propuesta inicial constan en DECISIONS.md, R-004.
+V0 tiene un flujo local ejecutable y pruebas automatizadas con las dos planillas sectoriales. Las fases 1 a 4 están verificadas en el alcance documentado. La base de acceso, organizaciones, backups y configuración HTTPS también está implementada; faltan dominio y servidor para publicar y validar la operación real. El stack local y sus diferencias frente a la propuesta inicial constan en DECISIONS.md, R-004 y R-006.
 
 ## Roadmap del producto
 
@@ -90,9 +90,21 @@ Salida esperada: entidad y registros persistidos sin importaciones parciales.
 
 ## Preparación del MVP
 
+### Base de acceso y operación
+
+- [x] Inicio de sesión, sesiones, cambio de contraseña y protección CSRF.
+- [x] Usuarios, roles y permisos comprobados en el servidor.
+- [x] Aislamiento de módulos, registros e importaciones por organización; migración de datos V0.
+- [x] Almacenamiento privado de la base y los XLSX temporales.
+- [x] Copias SQLite automáticas, verificación de integridad y comando de restauración.
+- [x] Configuración de Docker Compose y Caddy para HTTPS con dominio real.
+- [ ] Publicar en un servidor con dominio y comprobar certificado y redirección HTTPS.
+- [ ] Configurar copia cifrada fuera del servidor, monitoreo y prueba periódica de restauración.
+- [ ] Revisar la seguridad operativa y la interfaz completa antes de un piloto con datos reales.
+
 Antes de ampliar el producto, estudiar aproximadamente 5 a 10 planillas reales, como propone el brief. Observar fórmulas, relaciones implícitas, colores con significado, celdas combinadas, identificadores y tareas cotidianas.
 
-Antes de un piloto con datos reales: resolver autenticación, autorización, aislamiento entre organizaciones, almacenamiento privado, retención, backups y despliegue con HTTPS. No tratar el PoC local como un servicio multi-tenant validado.
+La base técnica de acceso y separación entre organizaciones está implementada y tiene pruebas de API. La operación real todavía depende de un servidor y dominio, copias externas y una revisión de seguridad; ver SECURITY_DEPLOYMENT.md. No tratar las pruebas locales como validación de un servicio público.
 
 ## Registro de avances
 
@@ -108,5 +120,8 @@ Antes de un piloto con datos reales: resolver autenticación, autorización, ais
 | 2026-10-12 | Carga y confirmación de ambas planillas; listado y formulario revisados visualmente | Navegador local con dos módulos de 30 registros |
 | 2026-10-12 | Medición sintética del límite 5.000 × 30 y registro de límites | `tests/benchmark_v0.py`, VALIDATION.md |
 | 2026-10-12 | Fórmulas simples y corrección durante la revisión de importación | `app/formulas.py`, `app/core.py`, `web/app.js`, pruebas y libro real del usuario; DECISIONS.md, R-005 |
+| 2026-10-12 | Traslado del trabajo al repositorio Git indicado por el usuario | `C:\Users\Rodrigo\Escritorio\Repositorio Git\tablio`, rama `main`, remoto `origin` |
+| 2026-10-12 | Acceso, roles, organizaciones, datos privados, backups y configuración HTTPS | `app/security.py`, `app/store.py`, `app/backup.py`, `compose.yaml`, `Caddyfile`, SECURITY_DEPLOYMENT.md; 12 pruebas, imagen y servicios Docker verificados; DECISIONS.md, R-006 |
+| 2026-10-12 | Copia verificada y migración de la base existente del nuevo repositorio | Backup privado en `backups/`, dos módulos preservados en `Legado V0`; falta crear el primer propietario por CLI |
 
 Actualizar las casillas y agregar evidencia en esta sección cada vez que se complete una tarea. Registrar cambios de alcance o arquitectura también en DECISIONS.md. No marcar implementación o pruebas como completadas por haberlas documentado.

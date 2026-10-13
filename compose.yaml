@@ -1,0 +1,62 @@
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    environment:
+      TABLIO_BIND_HOST: 0.0.0.0
+      TABLIO_PORT: 8000
+      TABLIO_DB_PATH: /private/data/tablio.sqlite3
+      TABLIO_UPLOADS_PATH: /private/uploads
+      TABLIO_SECURE_COOKIES: "1"
+      TABLIO_ORIGIN: https://${TABLIO_DOMAIN:?Definir TABLIO_DOMAIN en .env}
+    volumes:
+      - tablio_private:/private
+    expose:
+      - "8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/', timeout=3).read(1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+  backup:
+    build: .
+    restart: unless-stopped
+    command: ["python", "-m", "app.backup", "loop", "--retention-days", "30", "--interval-hours", "24"]
+    environment:
+      TABLIO_DB_PATH: /private/data/tablio.sqlite3
+      TABLIO_BACKUP_PATH: /backups
+    volumes:
+      - tablio_private:/private:ro
+      - tablio_backups:/backups
+    depends_on:
+      app:
+        condition: service_healthy
+  restore:
+    build: .
+    profiles: ["maintenance"]
+    entrypoint: ["python", "-m", "app.backup", "restore"]
+    environment:
+      TABLIO_DB_PATH: /private/data/tablio.sqlite3
+      TABLIO_BACKUP_PATH: /backups
+    volumes:
+      - tablio_private:/private
+      - tablio_backups:/backups
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    environment:
+      TABLIO_DOMAIN: ${TABLIO_DOMAIN:?Definir TABLIO_DOMAIN en .env}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+volumes:
+  tablio_private:
+  tablio_backups:
+  caddy_data:
+  caddy_config:

@@ -6,7 +6,13 @@ Tablio convierte una tabla de Excel en un módulo web para consultar y editar re
 
 ## Ejecutar en Visual Studio Code
 
-Requisito: Python 3.11 o superior. Abrí la carpeta del repositorio en VS Code y ejecutá en la terminal:
+Requisito: Python 3.11 o superior. Abrí esta carpeta del repositorio en VS Code. La primera vez, creá el propietario; el comando pedirá una contraseña de al menos 12 caracteres:
+
+```powershell
+python -m app.admin --email vos@ejemplo.com --name "Tu nombre" --organization "Mi organización"
+```
+
+Después ejecutá:
 
 ```powershell
 python -m app.server
@@ -44,8 +50,8 @@ data/      Base local creada al ejecutar (ignorada)
 uploads/   Archivos temporales de importación (ignorados)
 ```
 
-El [registro de decisiones](docs/DECISIONS.md) explica por qué la implementación local usa Python y SQLite en esta etapa. La [planificación](docs/PLANNING.md) distingue las funciones implementadas de las pendientes del MVP.
+El [registro de decisiones](docs/DECISIONS.md) explica por qué la implementación local usa Python y SQLite en esta etapa. La [planificación](docs/PLANNING.md) distingue las funciones implementadas de las pendientes del MVP. [Acceso, backups y despliegue](docs/SECURITY_DEPLOYMENT.md) describe los roles, la migración de datos V0, las copias y la preparación de HTTPS.
 
 ## Límite de uso
 
-V0 se ejecuta solo en `127.0.0.1`, con un único operador y sin autenticación. No debe exponerse a internet ni utilizarse con datos reales de clientes hasta implementar acceso, aislamiento entre organizaciones, copias de seguridad y controles operativos del MVP.
+La app local escucha en `127.0.0.1`. Ahora exige inicio de sesión y aplica permisos por organización. El despliegue con HTTPS está configurado mediante Docker Compose y Caddy, pero sigue pendiente de un servidor, dominio y verificación operativa. Antes de usar datos reales fuera de una prueba controlada, prepará copias externas, restauración, monitoreo y revisión de la infraestructura.

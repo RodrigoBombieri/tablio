@@ -1,9 +1,12 @@
 const $ = id => document.getElementById(id);
-const state = {modules:[],preview:null,module:null,page:1,editing:null};
+const state = {modules:[],preview:null,module:null,page:1,editing:null,auth:null,organizationId:null};
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
 async function api(path, options={}) {
-  const response = await fetch(path, options);
+  const headers=new Headers(options.headers||{});
+  if(state.auth?.csrfToken && options.method && options.method!=='GET')headers.set('X-CSRF-Token',state.auth.csrfToken);
+  if(state.organizationId)headers.set('X-Organization-Id',state.organizationId);
+  const response = await fetch(path, {...options,headers,credentials:'same-origin'});
   const data = await response.json();
   if (!response.ok) { const issue = new Error(data.error || 'No se pudo completar la operación.'); issue.data=data; throw issue; }
   return data;
@@ -13,14 +16,36 @@ function toast(message, isError=false) {
   clearTimeout(toast.timer); toast.timer=setTimeout(()=>node.style.display='none',4600);
 }
 function showView(name){for(const id of ['homeView','importView','moduleView']) $(id).hidden=id!==name+'View'; $('homeButton').classList.toggle('active',name==='home');}
+function currentOrg(){return state.auth?.organizations.find(o=>o.id===state.organizationId)}
+function canWrite(){return ['owner','admin','editor'].includes(currentOrg()?.role)}
+function renderAccount(){
+  $('organizationSelect').innerHTML=state.auth.organizations.map(o=>`<option value="${esc(o.id)}" ${o.id===state.organizationId?'selected':''}>${esc(o.name)}</option>`).join('');
+  $('sidebarOrg').textContent=currentOrg()?.name||'Organización';$('sidebarUser').textContent=state.auth.user.name;
+  $('usersButton').hidden=currentOrg()?.role!=='owner';
+  $('startImport').hidden=!canWrite();$('newRecordButton').hidden=!canWrite();
+  $('appShell').hidden=false;$('loginView').hidden=true;
+}
+async function boot(){
+  try{
+    state.auth=await api('/api/me');
+    state.organizationId=state.auth.organizations.find(o=>o.id===state.organizationId)?.id||state.auth.organizations[0]?.id||null;
+    renderAccount();home();
+  }catch(e){$('appShell').hidden=true;$('loginView').hidden=false;}
+}
+async function login(event){
+  event.preventDefault();$('loginError').textContent='';
+  try{await api('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:$('loginEmail').value,password:$('loginPassword').value})});$('loginPassword').value='';await boot();}
+  catch(e){$('loginError').textContent=e.message;}
+}
+async function logout(){try{await api('/api/logout',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});}catch(e){}state.auth=null;state.organizationId=null;await boot();}
 async function refreshModules(){
   state.modules=await api('/api/modules');
   $('moduleNav').innerHTML=state.modules.map(m=>`<button data-id="${esc(m.id)}" type="button">▦ <span>${esc(m.name)}</span></button>`).join('');
   $('moduleCards').innerHTML=state.modules.length?state.modules.map(m=>`<button class="module-card" data-id="${esc(m.id)}" type="button"><span class="card-icon">▦</span><strong>${esc(m.name)}</strong><small>${m.count} registros · Abrir módulo →</small></button>`).join(''):'<div class="empty">Todavía no hay módulos. Importá una planilla para empezar.</div>';
   document.querySelectorAll('[data-id]').forEach(node=>node.addEventListener('click',()=>openModule(node.dataset.id)));
 }
-function home(){showView('home');$('breadcrumbs').innerHTML='Mi organización <span>/</span> Inicio';refreshModules().catch(e=>toast(e.message,true));}
-function startImport(){state.preview=null;$('uploadPanel').hidden=false;$('reviewPanel').hidden=true;$('fileInput').value='';$('breadcrumbs').innerHTML='Mi organización <span>/</span> Nueva importación';showView('import');setStep(1);}
+function home(){showView('home');$('breadcrumbs').innerHTML=esc(currentOrg()?.name)+' <span>/</span> Inicio';refreshModules().catch(e=>toast(e.message,true));}
+function startImport(){if(!canWrite())return;state.preview=null;$('uploadPanel').hidden=false;$('reviewPanel').hidden=true;$('fileInput').value='';$('breadcrumbs').innerHTML=esc(currentOrg()?.name)+' <span>/</span> Nueva importación';showView('import');setStep(1);}
 function setStep(n){document.querySelectorAll('.step').forEach((s,i)=>s.classList.toggle('on',i<n));}
 async function upload(file){
   if(!file||!file.name.toLowerCase().endsWith('.xlsx')) return toast('Elegí un archivo XLSX.',true);
@@ -64,7 +89,7 @@ async function confirmImport(){
 }
 async function openModule(id){
   try{state.module=await api('/api/modules/'+id);state.page=1;showView('module');const schema=state.module.schema;
-    $('breadcrumbs').innerHTML=`Mi organización <span>/</span> ${esc(schema.name)}`;$('moduleTitle').textContent=schema.name;
+    $('breadcrumbs').innerHTML=`${esc(currentOrg()?.name)} <span>/</span> ${esc(schema.name)}`;$('moduleTitle').textContent=schema.name;
     $('filterField').innerHTML='<option value="">Sin filtro</option>'+schema.fields.map(f=>`<option value="${esc(f.id)}">${esc(f.label)}</option>`).join('');$('searchInput').value='';$('filterValue').value='';$('filterField').value='';updateOperators();await loadRecords();
   }catch(e){toast(e.message,true)}
 }
@@ -83,7 +108,7 @@ async function loadRecords(){
     const data=await api(`/api/modules/${id}/records?${params}`);state.records=data.items;
     $('moduleDescription').textContent=`${data.total} ${data.total===1?'registro':'registros'} · Información lista para consultar y editar`;
     const fields=state.module.schema.fields;
-    $('recordsArea').innerHTML=data.items.length?`<div class="records-scroll"><table class="records-table"><thead><tr>${fields.map(f=>`<th>${esc(f.label)}</th>`).join('')}<th>Acciones</th></tr></thead><tbody>${data.items.map(r=>`<tr>${fields.map(f=>`<td>${displayValue(r.values[f.id],f)}</td>`).join('')}<td><button data-edit="${r.id}">Editar</button> <button class="delete" data-delete="${r.id}">Eliminar</button></td></tr>`).join('')}</tbody></table></div>`:'<div class="data-empty">No hay registros para mostrar.</div>';
+    $('recordsArea').innerHTML=data.items.length?`<div class="records-scroll"><table class="records-table"><thead><tr>${fields.map(f=>`<th>${esc(f.label)}</th>`).join('')}${canWrite()?'<th>Acciones</th>':''}</tr></thead><tbody>${data.items.map(r=>`<tr>${fields.map(f=>`<td>${displayValue(r.values[f.id],f)}</td>`).join('')}${canWrite()?`<td><button data-edit="${r.id}">Editar</button> <button class="delete" data-delete="${r.id}">Eliminar</button></td>`:''}</tr>`).join('')}</tbody></table></div>`:'<div class="data-empty">No hay registros para mostrar.</div>';
     $('recordsArea').querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>openRecord(state.records.find(r=>r.id===b.dataset.edit)));
     $('recordsArea').querySelectorAll('[data-delete]').forEach(b=>b.onclick=()=>removeRecord(b.dataset.delete));
     $('pageInfo').textContent=`Página ${data.page} de ${Math.max(1,Math.ceil(data.total/25))} · ${data.total} registros`;
@@ -92,6 +117,7 @@ async function loadRecords(){
 }
 function displayValue(value,field){if(value===null||value===undefined||value==='')return '<span style="color:#a0aaa0">—</span>';if(field.type==='boolean')return value?'Sí':'No';if(field.type==='currency')return 'ARS '+Number(value).toLocaleString('es-AR',{minimumFractionDigits:field.scale,maximumFractionDigits:field.scale});return esc(value)}
 function openRecord(record=null){
+  if(!canWrite())return;
   state.editing=record;$('dialogEyebrow').textContent=record?'EDITAR REGISTRO':'NUEVO REGISTRO';$('dialogTitle').textContent=state.module.schema.name;
   $('recordFields').innerHTML=state.module.schema.fields.map(f=>{
     const value=record?.values[f.id]??'';let control;
@@ -115,5 +141,27 @@ $('filterField').onchange=()=>{updateOperators();state.page=1;loadRecords()};$('
 $('clearFilter').onclick=()=>{$('filterField').value='';$('filterValue').value='';updateOperators();state.page=1;loadRecords()};
 $('prevPage').onclick=()=>{state.page--;loadRecords()};$('nextPage').onclick=()=>{state.page++;loadRecords()};
 $('newRecordButton').onclick=()=>openRecord();$('recordForm').onsubmit=saveRecord;$('closeDialog').onclick=()=> $('recordDialog').close();$('cancelDialog').onclick=()=> $('recordDialog').close();
-$('exportButton').onclick=()=>{window.location.href=`/api/modules/${state.module.id}/export`};
-home();
+$('exportButton').onclick=async()=>{
+  try{
+    const response=await fetch(`/api/modules/${state.module.id}/export`,{headers:{'X-Organization-Id':state.organizationId},credentials:'same-origin'});
+    if(!response.ok)throw new Error((await response.json()).error||'No se pudo exportar.');
+    const url=URL.createObjectURL(await response.blob());const link=document.createElement('a');link.href=url;link.download=`tablio-${state.module.id.slice(0,8)}.xlsx`;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+  }catch(e){toast(e.message,true)}
+};
+$('loginForm').onsubmit=login;$('logoutButton').onclick=logout;
+$('passwordButton').onclick=()=>$('passwordDialog').showModal();
+$('cancelPassword').onclick=()=>$('passwordDialog').close();
+$('passwordForm').onsubmit=async event=>{event.preventDefault();try{await api('/api/change-password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.fromEntries(new FormData(event.target)))});event.target.reset();$('passwordDialog').close();state.auth=null;state.organizationId=null;await boot();toast('Contraseña actualizada. Volvé a ingresar.')}catch(e){toast(e.message,true)}};
+$('organizationSelect').onchange=()=>{state.organizationId=$('organizationSelect').value;state.module=null;renderAccount();home()};
+$('newOrgButton').onclick=async()=>{const name=prompt('Nombre de la nueva organización:');if(!name)return;try{const result=await api('/api/organizations',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name})});state.auth=await api('/api/me');state.organizationId=result.id;renderAccount();home();}catch(e){toast(e.message,true)}};
+async function refreshUsers(){
+  const users=await api('/api/users');
+  $('usersList').innerHTML=users.map(u=>`<div class="user-row"><div><strong>${esc(u.name)}</strong><small>${esc(u.email)}</small></div><select data-role="${esc(u.id)}" ${u.role==='owner'?'disabled':''}>${['owner','admin','editor','viewer'].filter(r=>r!=='owner'||u.role==='owner').map(r=>`<option value="${r}" ${r===u.role?'selected':''}>${({owner:'Propietario',admin:'Administrador',editor:'Editor',viewer:'Lector'})[r]}</option>`).join('')}</select>${u.role==='owner'?'':`<button data-remove="${esc(u.id)}" type="button">Quitar</button>`}</div>`).join('');
+  $('usersList').querySelectorAll('[data-role]').forEach(node=>node.onchange=async()=>{try{await api(`/api/users/${node.dataset.role}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({role:node.value})});toast('Rol actualizado.');await refreshUsers();}catch(e){toast(e.message,true);await refreshUsers()}});
+  $('usersList').querySelectorAll('[data-remove]').forEach(node=>node.onclick=async()=>{if(!confirm('¿Quitar el acceso de este usuario a la organización?'))return;try{await api(`/api/users/${node.dataset.remove}`,{method:'DELETE'});await refreshUsers()}catch(e){toast(e.message,true)}});
+}
+$('usersButton').onclick=async()=>{try{await refreshUsers();$('usersDialog').showModal()}catch(e){toast(e.message,true)}};
+$('closeUsers').onclick=()=>$('usersDialog').close();
+$('createUserForm').onsubmit=async event=>{event.preventDefault();const form=event.target,body=Object.fromEntries(new FormData(form));try{await api('/api/users',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});form.reset();await refreshUsers();toast('Usuario creado.')}catch(e){toast(e.message,true)}};
+$('membershipForm').onsubmit=async event=>{event.preventDefault();const form=event.target,body=Object.fromEntries(new FormData(form));try{await api('/api/memberships',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});form.reset();await refreshUsers();toast('Membresía agregada.')}catch(e){toast(e.message,true)}};
+boot();

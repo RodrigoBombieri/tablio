@@ -16,6 +16,8 @@ coverage/
 /tmp/
 /uploads/
 /data/
+/backups/
+/.private/
 __pycache__/
 *.pyc
 *.log

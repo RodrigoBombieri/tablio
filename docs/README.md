@@ -22,6 +22,7 @@ El [Project Brief](../Tablio%20%E2%80%94%20Project%20Brief.md) es la fuente de v
 | [POC_SPEC.md](POC_SPEC.md) | Datasets ficticios, conversiones, filtros y casos de aceptación |
 | [FIXTURES.md](FIXTURES.md) | XLSX vigentes de minimercado y corralón, tipos esperados y verificación |
 | [VALIDATION.md](VALIDATION.md) | Pruebas, recorrido en navegador, medición y límites conocidos |
+| [SECURITY_DEPLOYMENT.md](SECURITY_DEPLOYMENT.md) | Acceso, roles, organizaciones, copias y despliegue HTTPS |
 
 ## Convenciones
 
