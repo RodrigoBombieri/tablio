@@ -1,6 +1,7 @@
 import io
 import http.client
 import json
+import os
 import tempfile
 import threading
 import unittest
@@ -11,7 +12,7 @@ from app import store
 from app import backup
 from app.core import convert_rows, infer_sheet
 from app.formulas import parse_formula, evaluate
-from app.server import Handler
+from app.server import Handler, TablioHTTPServer
 from app.xlsx_io import SpreadsheetError, read_workbook, write_workbook
 from http.server import ThreadingHTTPServer
 
@@ -20,6 +21,16 @@ FIXTURES = ROOT / 'outputs' / '01a06e97-c8d6-7c20-aebd-4c816513d8af'
 
 
 class AppTests(unittest.TestCase):
+    @unittest.skipUnless(os.name == 'nt', 'Windows port binding')
+    def test_second_server_cannot_bind_to_same_port(self):
+        first=TablioHTTPServer(('127.0.0.1',0),Handler)
+        try:
+            with self.assertRaises(OSError):
+                second=TablioHTTPServer(('127.0.0.1',first.server_port),Handler)
+                second.server_close()
+        finally:
+            first.server_close()
+
     def test_a1_and_structured_references_are_equivalent(self):
         labels=['COSTO','% DE GTOS','BOLSA']
         formulas=['=(A2*B2)+C2','=([@COSTO]*[@[% DE GTOS]])+[@BOLSA]',

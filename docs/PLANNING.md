@@ -111,7 +111,7 @@ La base técnica de acceso y separación entre organizaciones está implementada
 
 - [x] Probar la primera pestaña de una planilla real de habilitaciones sin copiar sus datos personales al repositorio.
 - [x] Mostrar columnas sin título desmarcadas, diferenciar encabezados repetidos y avisar cuando una fórmula se conserva como último valor guardado en Excel.
-- [x] Agrupar fórmulas pendientes por columna y permitir excluir cada columna desde su propio grupo de errores.
+- [x] Agrupar fórmulas pendientes por fila y permitir excluir cada fila afectada, con opción de volver a incluirla antes de guardar.
 - [x] Permitir deshacer una importación inicial mientras el módulo no tenga cambios posteriores.
 - [x] Ofrecer plantillas de habilitaciones, minimercado y corralón; permitir agregar campos sugeridos para inventario.
 - [x] Mostrar un resumen de excepciones y sugerencias de reposición explicadas cuando existan los campos necesarios.
@@ -119,6 +119,16 @@ La base técnica de acceso y separación entre organizaciones está implementada
 - [ ] Validar estos flujos visualmente con usuarios de distintas edades y con planillas de cada rubro.
 
 El archivo real de habilitaciones no contiene stock ni ventas. Las sugerencias de compra se activan solo en módulos con «Stock actual» y «Stock mínimo»; las ventas registradas durante los últimos 30 días y «Días de entrega» mejoran el cálculo. También puede usarse un campo manual «Ventas 30 días» mientras no haya movimientos registrados. Son propuestas para revisión humana, no pedidos automáticos. Las fórmulas de Excel no compatibles con valor guardado se importan como valor fijo y se advierte que no se recalcularán.
+
+### Próximas microfuncionalidades propuestas (aún no implementadas)
+
+1. En la revisión del Excel, contraer inicialmente las columnas sin título y mostrar siempre cuántas columnas y filas quedarán fuera.
+2. Antes de guardar, mostrar un resumen final fácil de leer: registros a crear, filas excluidas, columnas usadas y fórmula que quedará como valor fijo.
+3. En cada error de validación, ofrecer «Ir a la fila» y mantener visible la acción de excluirla sin perder las correcciones escritas.
+4. Recordar la selección de columnas y tipos para una futura importación del mismo formato, con revisión visible antes de aplicar esa preferencia.
+5. En el módulo, conservar la búsqueda y filtros al volver de editar un registro; facilitar deshacer la última edición accidental.
+
+Revisar estas prioridades con usuarios adultos antes de implementarlas; no son funcionalidades completadas.
 
 ## Registro de avances
 
@@ -155,5 +165,6 @@ El archivo real de habilitaciones no contiene stock ni ventas. Las sugerencias d
 | 2026-10-13 | Actividad, invitaciones, recuperación y estado de backups; controles de lectura ampliados | `app/store.py`, `app/backup.py`, `compose.yaml`, pruebas de permisos y recuperación |
 | 2026-10-13 | Primera hoja real de habilitaciones, exclusión por columna, plantillas, avisos, movimientos de stock y reposición explicada | `app/xlsx_io.py`, `app/core.py`, `app/insights.py`, `app/store.py`, `web/`, validación sin incluir datos privados |
 | 2026-10-14 | Exclusión individual y reversible de filas con fórmulas conflictivas; comprobación de importación con celdas combinadas y ruta de guardado | `app/server.py`, `web/app.js`, `tests/test_app.py`; prueba HTTP con filas excluidas y libro real: 1.922 registros guardados en base temporal; inicio verificable desde VS Code |
+| 2026-10-14 | Diagnóstico en la app activa: dos servidores Windows compartían el puerto 8000 y respondían con versiones distintas; se detuvo el antiguo y se impidió un segundo enlace al mismo puerto | `app/server.py`, `tests/test_app.py`; importación y validación del libro real comprobadas en la interfaz local, sin confirmar un módulo nuevo |
 
 Actualizar las casillas y agregar evidencia en esta sección cada vez que se complete una tarea. Registrar cambios de alcance o arquitectura también en DECISIONS.md. No marcar implementación o pruebas como completadas por haberlas documentado.

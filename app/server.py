@@ -6,6 +6,7 @@ import hmac
 import mimetypes
 import os
 import re
+import socket
 import sqlite3
 import threading
 import time
@@ -29,6 +30,19 @@ LOGIN_LOCK = threading.Lock()
 
 ROOT = Path(__file__).resolve().parent.parent
 WEB = ROOT / "web"
+
+
+class TablioHTTPServer(ThreadingHTTPServer):
+    # On Windows, SO_REUSEADDR can bind two servers to the same port and split
+    # incoming requests between different versions of the application.
+    allow_reuse_address = os.name != "nt"
+
+    def server_bind(self):
+        if os.name == "nt":
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
+
+
 UPLOADS = Path(os.environ.get("TABLIO_UPLOADS_PATH", ROOT / "uploads"))
 UPLOADS.mkdir(parents=True,exist_ok=True)
 if os.name != "nt": os.chmod(UPLOADS,0o700)
@@ -499,7 +513,10 @@ def main():
         raise SystemExit("La exposición de red requiere HTTPS y TABLIO_SECURE_COOKIES=1.")
     if host != "127.0.0.1" and not os.environ.get("TABLIO_ORIGIN", "").startswith("https://"):
         raise SystemExit("Configurá TABLIO_ORIGIN con la URL HTTPS pública.")
-    server = ThreadingHTTPServer((host, port), Handler)
+    try:
+        server = TablioHTTPServer((host, port), Handler)
+    except OSError as exc:
+        raise SystemExit(f"No se pudo abrir {host}:{port}. Cerrá el Tablio que ya usa ese puerto antes de iniciar otro.") from exc
     print(f"Tablio disponible en {host}:{port} (código: {ROOT})",flush=True)
     try: server.serve_forever()
     except KeyboardInterrupt: pass
