@@ -80,8 +80,6 @@ def read_workbook(blob: bytes) -> list[dict]:
                 continue
             root = ET.fromstring(archive.read(path))
             merges = root.find(f"{S}mergeCells")
-            if merges is not None and len(merges):
-                raise SpreadsheetError(f"La hoja {sheet.get('name')} contiene celdas combinadas.")
             rows = []
             for row in root.findall(f"{S}sheetData/{S}row"):
                 number = int(row.get("r", "0"))
@@ -91,8 +89,8 @@ def read_workbook(blob: bytes) -> list[dict]:
                     if not re.match(r"^[A-Z]+\d+$", ref):
                         continue
                     col = _column_index(ref)
-                    if col >= 30 or number > 5001:
-                        raise SpreadsheetError("La tabla supera 30 columnas o 5.000 registros.")
+                    if col >= 64 or number > 5001:
+                        raise SpreadsheetError("La hoja supera 64 columnas o 5.000 registros.")
                     formula_node = cell.find(f"{S}f")
                     if formula_node is not None and len(formula_node.text or "") > 500:
                         raise SpreadsheetError(f"Fórmula demasiado larga en {sheet.get('name')}!{ref}.")
@@ -117,7 +115,8 @@ def read_workbook(blob: bytes) -> list[dict]:
                     cells[col] = {"formula": "=" + (formula_node.text or ""), "cached": value} if formula_node is not None else value
                 if cells:
                     rows.append({"number": number, "cells": cells})
-            sheets.append({"name": sheet.get("name"), "rows": rows})
+            sheets.append({"name": sheet.get("name"), "rows": rows,
+                           "mergedRanges": [item.get("ref") for item in merges] if merges is not None else []})
         if not sheets:
             raise SpreadsheetError("El libro no contiene hojas con datos.")
         return sheets

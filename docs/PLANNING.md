@@ -107,6 +107,19 @@ Antes de ampliar el producto, estudiar aproximadamente 5 a 10 planillas reales, 
 
 La base técnica de acceso y separación entre organizaciones está implementada y tiene pruebas de API. La operación real todavía depende de un servidor y dominio, copias externas y una revisión de seguridad; ver SECURITY_DEPLOYMENT.md. No tratar las pruebas locales como validación de un servicio público.
 
+## Mejora de importación y trabajo diario
+
+- [x] Probar la primera pestaña de una planilla real de habilitaciones sin copiar sus datos personales al repositorio.
+- [x] Mostrar columnas sin título desmarcadas, diferenciar encabezados repetidos y avisar cuando una fórmula se conserva como último valor guardado en Excel.
+- [x] Agrupar fórmulas pendientes por columna y permitir excluir cada columna desde su propio grupo de errores.
+- [x] Permitir deshacer una importación inicial mientras el módulo no tenga cambios posteriores.
+- [x] Ofrecer plantillas de habilitaciones, minimercado y corralón; permitir agregar campos sugeridos para inventario.
+- [x] Mostrar un resumen de excepciones y sugerencias de reposición explicadas cuando existan los campos necesarios.
+- [x] Registrar ventas y entradas de mercadería en módulos con stock numérico, actualizar existencias y usar ventas de los últimos 30 días en la reposición.
+- [ ] Validar estos flujos visualmente con usuarios de distintas edades y con planillas de cada rubro.
+
+El archivo real de habilitaciones no contiene stock ni ventas. Las sugerencias de compra se activan solo en módulos con «Stock actual» y «Stock mínimo»; las ventas registradas durante los últimos 30 días y «Días de entrega» mejoran el cálculo. También puede usarse un campo manual «Ventas 30 días» mientras no haya movimientos registrados. Son propuestas para revisión humana, no pedidos automáticos. Las fórmulas de Excel no compatibles con valor guardado se importan como valor fijo y se advierte que no se recalcularán.
+
 ## Registro de avances
 
 ### Mejoras posteriores al PoC
@@ -140,5 +153,6 @@ La base técnica de acceso y separación entre organizaciones está implementada
 | 2026-10-13 | Revisión de filas, corrección de datos y fórmulas antes de guardar | `app/server.py`, `web/app.js`, prueba de corrección |
 | 2026-10-13 | Configuración de campos, vistas personales, búsqueda y paginación SQL | `app/store.py`, `web/index.html`, `web/app.js`, prueba HTTP |
 | 2026-10-13 | Actividad, invitaciones, recuperación y estado de backups; controles de lectura ampliados | `app/store.py`, `app/backup.py`, `compose.yaml`, pruebas de permisos y recuperación |
+| 2026-10-13 | Primera hoja real de habilitaciones, exclusión por columna, plantillas, avisos, movimientos de stock y reposición explicada | `app/xlsx_io.py`, `app/core.py`, `app/insights.py`, `app/store.py`, `web/`, validación sin incluir datos privados |
 
 Actualizar las casillas y agregar evidencia en esta sección cada vez que se complete una tarea. Registrar cambios de alcance o arquitectura también en DECISIONS.md. No marcar implementación o pruebas como completadas por haberlas documentado.

@@ -52,6 +52,8 @@ def initialize():
         CREATE INDEX IF NOT EXISTS sessions_expires ON sessions(expires_at);
         CREATE TABLE IF NOT EXISTS modules (id TEXT PRIMARY KEY,name TEXT NOT NULL,schema_json TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
         CREATE TABLE IF NOT EXISTS records (id TEXT PRIMARY KEY,module_id TEXT NOT NULL REFERENCES modules(id) ON DELETE CASCADE,values_json TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+        CREATE TABLE IF NOT EXISTS stock_movements (id TEXT PRIMARY KEY,organization_id TEXT NOT NULL REFERENCES organizations(id),module_id TEXT NOT NULL REFERENCES modules(id) ON DELETE CASCADE,record_id TEXT NOT NULL REFERENCES records(id) ON DELETE CASCADE,user_id TEXT NOT NULL REFERENCES users(id),kind TEXT NOT NULL CHECK(kind IN ('sale','receipt')),quantity TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+        CREATE INDEX IF NOT EXISTS stock_movements_recent ON stock_movements(organization_id,module_id,kind,created_at);
         CREATE INDEX IF NOT EXISTS records_module ON records(module_id);
         CREATE TABLE IF NOT EXISTS imports (id TEXT PRIMARY KEY,module_id TEXT NOT NULL REFERENCES modules(id),created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
         CREATE TABLE IF NOT EXISTS pending_uploads (token TEXT PRIMARY KEY,organization_id TEXT NOT NULL REFERENCES organizations(id),user_id TEXT NOT NULL REFERENCES users(id),expires_at INTEGER NOT NULL);
@@ -326,7 +328,68 @@ def module_list(org_id):
 def get_module(org_id,module_id):
     with connection() as db:
         r=db.execute("SELECT * FROM modules WHERE id=? AND organization_id=?",(module_id,org_id)).fetchone()
-        return {"id":r["id"],"schema":json.loads(r["schema_json"])} if r else None
+        return {"id":r["id"],"schema":json.loads(r["schema_json"]),
+                "canUndoImport":_can_undo_import(db,org_id,module_id)} if r else None
+
+
+def _can_undo_import(db,org_id,module_id):
+    imported=db.execute("SELECT 1 FROM imports WHERE module_id=? AND organization_id=?",(module_id,org_id)).fetchone()
+    changed=db.execute("""SELECT 1 FROM audit_events WHERE organization_id=? AND module_id=? AND action IN
+        ('record_created','record_updated','record_deleted','module_configured','reimport_applied','reimport_undone','stock_movement') LIMIT 1""",
+        (org_id,module_id)).fetchone()
+    return bool(imported and not changed)
+
+
+def undo_import(org_id,module_id,actor_id=None):
+    with connection() as db:
+        if not _can_undo_import(db,org_id,module_id):
+            raise ValueError("Esta importación ya tiene cambios. Conservá el módulo y sus datos.")
+        db.execute("DELETE FROM imports WHERE module_id=? AND organization_id=?",(module_id,org_id))
+        db.execute("DELETE FROM modules WHERE id=? AND organization_id=?",(module_id,org_id))
+        _audit(db,org_id,None,actor_id,"import_undone",{"moduleId":module_id})
+
+
+def record_stock_movement(org_id,module_id,record_id,kind,quantity,actor_id):
+    from decimal import Decimal, InvalidOperation
+    from .core import validate_record
+    from .insights import stock_field
+    if kind not in {"sale","receipt"}: raise ValueError("Elegí venta o entrada de mercadería.")
+    try: amount=Decimal(str(quantity))
+    except (InvalidOperation,TypeError): raise ValueError("Ingresá una cantidad válida.")
+    if not amount.is_finite() or amount<=0 or amount>1000000000:
+        raise ValueError("Ingresá una cantidad positiva válida.")
+    with connection() as db:
+        db.execute("BEGIN IMMEDIATE")
+        module=db.execute("SELECT schema_json FROM modules WHERE id=? AND organization_id=?",(module_id,org_id)).fetchone()
+        record=db.execute("SELECT values_json FROM records WHERE id=? AND module_id=?",(record_id,module_id)).fetchone()
+        if not module or not record: raise ValueError("Producto no encontrado.")
+        schema=json.loads(module["schema_json"])
+        field=stock_field(schema["fields"])
+        if not field or field["type"] not in {"integer","decimal","currency"} or field.get("formula"):
+            raise ValueError("Configurá un campo numérico llamado Stock actual.")
+        values=json.loads(record["values_json"])
+        try: current=Decimal(str(values[field["id"]]))
+        except (InvalidOperation,KeyError,TypeError): raise ValueError("Completá el stock actual de este producto antes de registrar movimientos.")
+        if kind=="sale" and amount>current: raise ValueError("La venta supera el stock disponible.")
+        updated=current-amount if kind=="sale" else current+amount
+        values[field["id"]]=str(updated)
+        normalized=validate_record(values,schema)
+        movement_id=str(uuid.uuid4())
+        db.execute("UPDATE records SET values_json=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND module_id=?",(json.dumps(normalized,ensure_ascii=False),record_id,module_id))
+        db.execute("INSERT INTO stock_movements(id,organization_id,module_id,record_id,user_id,kind,quantity) VALUES(?,?,?,?,?,?,?)",(movement_id,org_id,module_id,record_id,actor_id,kind,str(amount)))
+        _audit(db,org_id,module_id,actor_id,"stock_movement",{"recordId":record_id,"kind":kind,"quantity":str(amount)})
+        return {"id":movement_id,"stock":normalized[field["id"]]}
+
+
+def recent_sales(org_id,module_id):
+    from decimal import Decimal
+    with connection() as db:
+        rows=db.execute("""SELECT record_id,quantity FROM stock_movements WHERE organization_id=? AND module_id=?
+            AND kind='sale' AND created_at>=datetime('now','-30 days')""",(org_id,module_id))
+        result={}
+        for row in rows:
+            result[row["record_id"]]=result.get(row["record_id"],Decimal(0))+Decimal(row["quantity"])
+        return {key:float(value) for key,value in result.items()}
 
 
 def update_module_schema(org_id,module_id,candidate,actor_id=None):
@@ -380,7 +443,10 @@ def update_module_schema(org_id,module_id,candidate,actor_id=None):
             clean.append(item)
         primary=candidate.get("primaryFieldId",old["primaryFieldId"])
         if primary not in ids: raise ValueError("Elegí un campo principal válido.")
-        updated={**old,"revision":revision+1,"name":name,"primaryFieldId":primary,"fields":clean}
+        template=candidate.get("template",old.get("template","general"))
+        if template not in {"general","habilitaciones","minimercado","corralon"}:
+            raise ValueError("Elegí una plantilla válida.")
+        updated={**old,"revision":revision+1,"name":name,"template":template,"primaryFieldId":primary,"fields":clean}
         records=list(db.execute("SELECT id,values_json FROM records WHERE module_id=?",(module_id,)))
         for record in records:
             values=json.loads(record["values_json"])

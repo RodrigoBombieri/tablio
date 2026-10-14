@@ -58,6 +58,28 @@ async function refreshModules(){
   $('moduleNav').innerHTML=state.modules.map(m=>`<button data-id="${esc(m.id)}" type="button">▦ <span>${esc(m.name)}</span></button>`).join('');
   $('moduleCards').innerHTML=state.modules.length?state.modules.map(m=>`<button class="module-card" data-id="${esc(m.id)}" type="button"><span class="card-icon">▦</span><strong>${esc(m.name)}</strong><small>${m.count} registros · Abrir módulo →</small></button>`).join(''):'<div class="empty">Todavía no hay módulos. Importá una planilla para empezar.</div>';
   document.querySelectorAll('[data-id]').forEach(node=>node.addEventListener('click',()=>openModule(node.dataset.id)));
+  renderHomeAttention();
+}
+async function renderHomeAttention(){
+  const target=$('homeAttention');
+  if(!target)return;
+  if(!state.modules.length){target.innerHTML='<p class="empty">Importá una planilla para ver qué necesita atención.</p>';return;}
+  try{
+    const reports=await Promise.all(state.modules.map(async m=>({module:m,report:await api(`/api/modules/${m.id}/insights`)})));
+    const cards=reports.flatMap(({module,report})=>report.groups.map(g=>`<button class="attention-card" type="button" data-attention-module="${esc(module.id)}"><strong>${g.count} · ${esc(g.title)}</strong><span>${esc(module.name)}</span><small>${esc(g.explanation)}</small></button>`));
+    target.innerHTML=cards.length?cards.join(''):'<p class="empty">No hay avisos por ahora. Podés seguir trabajando con tus módulos.</p>';
+    target.querySelectorAll('[data-attention-module]').forEach(b=>b.onclick=()=>openModule(b.dataset.attentionModule));
+  }catch(e){target.innerHTML='<p class="empty">No se pudo cargar el resumen.</p>'}
+}
+async function renderModuleAttention(){
+  const target=$('moduleAttention');if(!state.module)return;
+  try{
+    const report=await api(`/api/modules/${state.module.id}/insights`);
+    state.moduleInsights=report;
+    const groupHtml=report.groups.map(g=>`<div class="attention-card"><strong>${g.count} · ${esc(g.title)}</strong><p>${esc(g.explanation)}</p><small>Ejemplos: ${esc(g.examples.join(' · '))}</small></div>`).join('');
+    const orders=report.orders.length?`<details><summary>Ver sugerencias de compra (${report.orderCount})</summary><div class="order-list">${report.orders.map(o=>`<div><strong>${esc(o.name)}: pedir ${esc(o.suggestedQuantity)}</strong><p>${esc(o.reason)}</p></div>`).join('')}</div><p>Son sugerencias para revisar; Tablio no envía pedidos automáticamente.</p></details>`:'';
+    target.innerHTML=`<h2>Qué necesita atención</h2><p>${esc(report.guidance)}</p>${groupHtml||'<p>No hay avisos con los datos disponibles.</p>'}${orders}`;
+  }catch(e){target.textContent='No se pudo cargar el resumen de este módulo.'}
 }
 function home(){showView('home');$('breadcrumbs').innerHTML=esc(currentOrg()?.name)+' <span>/</span> Inicio';refreshModules().catch(e=>toast(e.message,true));}
 function startImport(target=null){if(!canWrite())return;state.importTarget=target;state.reviewDigest=null;state.preview=null;$('uploadPanel').hidden=false;$('reviewPanel').hidden=true;$('fileInput').value='';const updating=!!target;$('importEyebrow').textContent=updating?'ACTUALIZAR DATOS':'NUEVO MÓDULO';$('importTitle').textContent=updating?'Actualizar desde Excel':'Importar una planilla';$('importDescription').textContent=updating?'Elegí el Excel actualizado. Antes de guardar, vas a ver qué registros se agregarán y cuáles cambiarán. Los que no figuren en el archivo quedarán como están.':'Subí un archivo Excel y revisá cómo Tablio interpreta sus columnas.';$('breadcrumbs').innerHTML=esc(currentOrg()?.name)+' <span>/</span> '+(updating?'Actualizar datos':'Nueva importación');showView('import');setStep(1);}
@@ -74,11 +96,28 @@ async function upload(file){
 function renderReview(){
   const p=state.preview;$('uploadPanel').hidden=true;$('reviewPanel').hidden=false;setStep(2);
   if(state.importTarget){renderReimportReview();return;}
-  const fields=p.fields.map((f,i)=>`<tr data-index="${i}"><td><input type="checkbox" class="include" checked aria-label="Incluir ${esc(f.label)}"></td><td><input type="text" class="label" value="${esc(f.label)}" aria-label="Etiqueta de ${esc(f.label)}"><br><small>Columna ${f.sourceColumn+1}${f.formulaCount?' · Calculada':''}</small></td><td><select class="type" aria-label="Tipo de ${esc(f.label)}" ${f.formulaCount?'disabled':''}>${['text','integer','decimal','currency','date','boolean','enum'].map(t=>`<option value="${t}" ${t===f.type?'selected':''}>${({text:'Texto',integer:'Entero',decimal:'Decimal',currency:'Importe',date:'Fecha',boolean:'Sí / No',enum:'Opciones'})[t]}</option>`).join('')}</select></td><td><input type="checkbox" class="required" ${f.required?'checked':''} aria-label="Obligatorio ${esc(f.label)}"></td><td><input type="number" min="0" max="6" class="scale" value="${f.scale??2}" aria-label="Decimales de ${esc(f.label)}"></td><td><input type="text" class="options" value="${esc(f.options.join(', '))}" placeholder="Separadas por coma" aria-label="Opciones de ${esc(f.label)}"></td><td><small>${f.emptyCount} vacíos<br>${esc(f.formula?'='+f.formula:f.examples.slice(0,2).join(' · '))}</small></td></tr>`).join('');
+  const fields=p.fields.map((f,i)=>`<tr data-index="${i}"><td><input type="checkbox" class="include" ${f.ignored?'':'checked'} aria-label="Incluir ${esc(f.label)}"></td><td><input type="text" class="label" value="${esc(f.label)}" aria-label="Etiqueta de ${esc(f.label)}"><br><small>Columna ${f.sourceColumn+1}${f.formulaCount?' · Calculada':''}</small></td><td><select class="type" aria-label="Tipo de ${esc(f.label)}" ${f.formulaCount?'disabled':''}>${['text','integer','decimal','currency','date','boolean','enum'].map(t=>`<option value="${t}" ${t===f.type?'selected':''}>${({text:'Texto',integer:'Entero',decimal:'Decimal',currency:'Importe',date:'Fecha',boolean:'Sí / No',enum:'Opciones'})[t]}</option>`).join('')}</select></td><td><input type="checkbox" class="required" ${f.required?'checked':''} aria-label="Obligatorio ${esc(f.label)}"></td><td><input type="number" min="0" max="6" class="scale" value="${f.scale??2}" aria-label="Decimales de ${esc(f.label)}"></td><td><input type="text" class="options" value="${esc(f.options.join(', '))}" placeholder="Separadas por coma" aria-label="Opciones de ${esc(f.label)}"></td><td><small>${f.emptyCount} vacíos<br>${esc(f.formula?'='+f.formula:f.examples.slice(0,2).join(' · '))}</small></td></tr>`).join('');
   const issues=p.formulaIssues||[];
-  const issueList=issues.length?`<section class="formula-issues"><h3>Fórmulas para corregir (${issues.length})</h3><p>Corregí la expresión en su fila y columna. Las referencias deben ser de la misma fila. También podés excluir la columna completa.</p>${issues.map(issue=>`<label>Fila ${issue.row}, columna ${issue.column} (${esc(issue.field)})<input class="formula-correction" data-key="${issue.row}:${issue.column}" value="${esc(issue.formula)}"><small>${esc(issue.message)}</small></label>`).join('')}</section>`:'';
+  const issueColumns=[...new Set(issues.map(issue=>issue.column))];
+  const issueList=issues.length?`<section class="formula-issues" id="formulaIssueList"><h3>Fórmulas para corregir <span id="formulaIssueCount">(${issues.length})</span></h3><p>Podés corregir cada fórmula o excluir una columna completa con el botón que aparece junto a su nombre.</p>${issueColumns.map(column=>{const group=issues.filter(issue=>issue.column===column);return `<div class="formula-column" data-issue-column="${column}"><div class="formula-column-head"><strong>Columna ${column}: ${esc(group[0].field)} · ${group.length} ${group.length===1?'fórmula':'fórmulas'}</strong><button class="button secondary" type="button" data-exclude-column="${column}">Excluir esta columna</button></div>${group.map(issue=>`<label>Fila ${issue.row}<input class="formula-correction" data-key="${issue.row}:${issue.column}" value="${esc(issue.formula)}"><small>${esc(issue.message)}</small></label>`).join('')}</div>`}).join('')}</section>`:'';
   $('reviewPanel').innerHTML=`<div class="panel"><div class="review-header"><div><h2>Revisá la estructura</h2><p>${p.rowCount} registros · ${p.fields.length} columnas detectadas</p></div><button class="button secondary" id="changeFile" type="button">Cambiar archivo</button></div><div class="review-content"><label for="sheetSelect">Hoja del libro</label><select class="name-input" id="sheetSelect">${p.sheets.map(s=>`<option ${s===p.sheet?'selected':''}>${esc(s)}</option>`).join('')}</select><label for="moduleName">Nombre del módulo</label><input class="name-input" id="moduleName" value="${esc(p.sheet)}" maxlength="80"><div class="table-scroll"><table class="field-table"><thead><tr><th>Usar</th><th>Columna</th><th>Tipo</th><th>Obligatorio</th><th>Decimales</th><th>Opciones</th><th>Muestra</th></tr></thead><tbody>${fields}</tbody></table></div>${issueList}<p class="upload-note">Revisá las opciones y los tipos. Los importes se interpretan en ARS. Podés comprobar todas las filas antes de guardar.</p><div id="importErrors" role="alert"></div><div id="dataCorrections"></div><div id="sampleRows"></div></div><div class="review-actions"><span class="hint">Ningún registro se guardará si hay errores.</span><div><button class="button secondary" id="validateImport" type="button">Comprobar datos</button> <button class="button primary" id="confirmImport" type="button">Guardar módulo →</button></div></div></div>`;
+  const suggested=p.fields.some(f=>/habilitaci[oó]n|factibilidad/i.test(f.label))?'habilitaciones':'general';
+  $('moduleName').insertAdjacentHTML('afterend',`<label for="templateSelect">¿Qué tipo de planilla es?</label><select class="name-input" id="templateSelect"><option value="general">Otra planilla</option><option value="habilitaciones" ${suggested==='habilitaciones'?'selected':''}>Habilitaciones</option><option value="minimercado">Minimercado</option><option value="corralon">Corralón de materiales</option></select>${(p.warnings||[]).length?`<div class="import-warnings"><strong>Revisá estos detalles del Excel</strong><ul>${p.warnings.map(w=>`<li>${esc(w)}</li>`).join('')}</ul></div>`:''}`);
   $('changeFile').onclick=()=>startImport();
+  for(const issue of issues){
+    if(p.fields[issue.column-1]?.formulaCount)continue;
+    const input=Array.from($('formulaIssueList')?.querySelectorAll('.formula-correction')||[]).find(node=>node.dataset.key===`${issue.row}:${issue.column}`);
+    if(input){input.value='';input.placeholder='Escribí el valor correcto, sin =';input.setAttribute('aria-label',`Valor fijo para la fila ${issue.row}, columna ${issue.column}`);}
+  }
+  $('formulaIssueList')?.querySelectorAll('[data-exclude-column]').forEach(button=>button.onclick=()=>{
+    const column=Number(button.dataset.excludeColumn);
+    const row=document.querySelector(`.field-table tr[data-index="${column-1}"]`);
+    if(row)row.querySelector('.include').checked=false;
+    button.closest('.formula-column').remove();
+    const remaining=issues.filter(issue=>document.querySelector(`.field-table tr[data-index="${issue.column-1}"] .include`)?.checked);
+    if(remaining.length)$('formulaIssueCount').textContent=`(${remaining.length})`;
+    else $('formulaIssueList').innerHTML='<h3>Fórmulas revisadas</h3><p>Excluiste las columnas con fórmulas pendientes. Comprobá los datos antes de guardar.</p>';
+  });
   $('sheetSelect').onchange=async()=>{try{state.preview=await api(`/api/preview?token=${encodeURIComponent(p.token)}&sheet=${encodeURIComponent($('sheetSelect').value)}`);renderReview();}catch(e){toast(e.message,true)}};
   $('confirmImport').onclick=confirmImport;
   $('validateImport').onclick=validateImport;
@@ -94,11 +133,11 @@ function collectSchema(){
     fields.push(field);
   });
   if(!fields.length)throw new Error('Elegí al menos una columna.');
-  return {schemaVersion:1,name:$('moduleName').value.trim(),primaryFieldId:fields.find(f=>f.type==='text')?.id||fields[0].id,fields};
+  return {schemaVersion:1,name:$('moduleName').value.trim(),template:$('templateSelect').value,primaryFieldId:fields.find(f=>f.type==='text')?.id||fields[0].id,fields};
 }
 function collectCorrections(){
   const formulaCorrections={},dataCorrections={};
-  document.querySelectorAll('.formula-correction').forEach(node=>formulaCorrections[node.dataset.key]=node.value.trim());
+  document.querySelectorAll('.formula-correction').forEach(node=>{if(node.value.trim())formulaCorrections[node.dataset.key]=node.value.trim()});
   document.querySelectorAll('.data-correction').forEach(node=>dataCorrections[node.dataset.key]=node.value);
   return {formulaCorrections,dataCorrections};
 }
@@ -157,8 +196,8 @@ async function confirmReimport(){
 async function openModule(id){
   try{state.module=await api('/api/modules/'+id);state.page=1;showView('module');const schema=state.module.schema;
     $('breadcrumbs').innerHTML=`${esc(currentOrg()?.name)} <span>/</span> ${esc(schema.name)}`;$('moduleTitle').textContent=schema.name;
-    $('schemaButton').hidden=!canWrite();state.visibleColumns=new Set(schema.fields.map(f=>f.id));
-    $('filterField').innerHTML='<option value="">Sin filtro</option>'+schema.fields.map(f=>`<option value="${esc(f.id)}">${esc(f.label)}</option>`).join('');$('sortField').innerHTML='<option value="">Orden original</option>'+schema.fields.map(f=>`<option value="${esc(f.id)}">${esc(f.label)}</option>`).join('');$('sortField').value='';$('sortDirection').value='asc';$('searchInput').value='';$('filterValue').value='';$('filterField').value='';renderColumns();updateOperators();await refreshViews();await loadRecords();
+    $('schemaButton').hidden=!canWrite();$('undoImportButton').hidden=!canWrite()||!state.module.canUndoImport;state.visibleColumns=new Set(schema.fields.map(f=>f.id));
+    $('filterField').innerHTML='<option value="">Sin filtro</option>'+schema.fields.map(f=>`<option value="${esc(f.id)}">${esc(f.label)}</option>`).join('');$('sortField').innerHTML='<option value="">Orden original</option>'+schema.fields.map(f=>`<option value="${esc(f.id)}">${esc(f.label)}</option>`).join('');$('sortField').value='';$('sortDirection').value='asc';$('searchInput').value='';$('filterValue').value='';$('filterField').value='';renderColumns();updateOperators();await refreshViews();await renderModuleAttention();await loadRecords();
   }catch(e){toast(e.message,true)}
 }
 function renderColumns(){
@@ -189,6 +228,14 @@ async function loadRecords(){
     $('recordsArea').innerHTML=data.items.length?`<div class="records-scroll"><table class="records-table"><thead><tr>${fields.map(f=>`<th>${esc(f.label)}</th>`).join('')}${canWrite()?'<th>Acciones</th>':''}</tr></thead><tbody>${data.items.map(r=>`<tr>${fields.map(f=>`<td data-label="${esc(f.label)}">${displayValue(r.values[f.id],f)}</td>`).join('')}${canWrite()?`<td data-label="Acciones"><button data-edit="${r.id}" aria-label="Editar registro ${esc(r.values[state.module.schema.primaryFieldId]??'')}">Editar</button> <button class="delete" data-delete="${r.id}" aria-label="Eliminar registro ${esc(r.values[state.module.schema.primaryFieldId]??'')}">Eliminar</button></td>`:''}</tr>`).join('')}</tbody></table></div>`:'<div class="data-empty">No hay registros para mostrar.</div>';
     $('recordsArea').querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>openRecord(state.records.find(r=>r.id===b.dataset.edit)));
     $('recordsArea').querySelectorAll('[data-delete]').forEach(b=>b.onclick=()=>removeRecord(b.dataset.delete));
+    if(canWrite()&&state.moduleInsights?.stockFieldId){
+      $('recordsArea').querySelectorAll('[data-edit]').forEach(button=>{
+        const cell=button.closest('td');
+        cell.insertAdjacentHTML('beforeend',` <button type="button" class="movement-button" data-sale="${esc(button.dataset.edit)}">Registrar venta</button> <button type="button" class="movement-button" data-receipt="${esc(button.dataset.edit)}">Entrada de mercadería</button>`);
+      });
+      $('recordsArea').querySelectorAll('[data-sale]').forEach(button=>button.onclick=()=>openMovement(state.records.find(r=>r.id===button.dataset.sale),'sale'));
+      $('recordsArea').querySelectorAll('[data-receipt]').forEach(button=>button.onclick=()=>openMovement(state.records.find(r=>r.id===button.dataset.receipt),'receipt'));
+    }
     $('pageInfo').textContent=`Página ${data.page} de ${Math.max(1,Math.ceil(data.total/25))} · ${data.total} registros`;
     $('prevPage').disabled=data.page<=1;$('nextPage').disabled=data.page*25>=data.total;
   }catch(e){toast(e.message,true)}
@@ -209,9 +256,28 @@ function openRecord(record=null){
 async function saveRecord(event){
   event.preventDefault();const values={};for(const f of state.module.schema.fields){const node=document.querySelector(`[data-field="${f.id}"]`);values[f.id]=node.value===''?null:f.type==='boolean'?node.value==='true':node.value;}
   const id=state.module.id,edit=state.editing;const url=`/api/modules/${id}/records${edit?'/'+edit.id:''}`;
-  try{await api(url,{method:edit?'PUT':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({values})});$('recordDialog').close();toast(edit?'Registro actualizado.':'Registro creado.');await loadRecords();await refreshModules();}catch(e){toast(e.message,true)}
+  try{await api(url,{method:edit?'PUT':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({values})});$('recordDialog').close();toast(edit?'Registro actualizado.':'Registro creado.');await loadRecords();await refreshModules();await renderModuleAttention();}catch(e){toast(e.message,true)}
 }
-async function removeRecord(id){if(!confirm('¿Eliminar este registro?'))return;try{await api(`/api/modules/${state.module.id}/records/${id}`,{method:'DELETE'});toast('Registro eliminado.');await loadRecords();await refreshModules();}catch(e){toast(e.message,true)}}
+async function removeRecord(id){if(!confirm('¿Eliminar este registro?'))return;try{await api(`/api/modules/${state.module.id}/records/${id}`,{method:'DELETE'});toast('Registro eliminado.');await loadRecords();await refreshModules();await renderModuleAttention();}catch(e){toast(e.message,true)}}
+function openMovement(record,kind){
+  if(!record)return;
+  state.movement={recordId:record.id,kind};
+  const name=record.values[state.module.schema.primaryFieldId]||'este producto';
+  $('movementTitle').textContent=kind==='sale'?'Registrar venta':'Registrar entrada de mercadería';
+  $('movementDescription').textContent=`${name}. El stock actual se actualizará al guardar.`;
+  $('movementQuantity').value='';$('movementDialog').showModal();$('movementQuantity').focus();
+}
+$('cancelMovement').onclick=()=>$('movementDialog').close();
+$('movementForm').onsubmit=async event=>{
+  event.preventDefault();if(!state.movement)return;
+  const {recordId,kind}=state.movement;
+  try{
+    await api(`/api/modules/${state.module.id}/records/${recordId}/movements`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({kind,quantity:$('movementQuantity').value})});
+    state.module.canUndoImport=false;$('undoImportButton').hidden=true;
+    $('movementDialog').close();toast(kind==='sale'?'Venta registrada y stock actualizado.':'Entrada registrada y stock actualizado.');
+    await renderModuleAttention();await loadRecords();
+  }catch(e){toast(e.message,true)}
+};
 
 $('homeButton').onclick=home;$('startImport').onclick=()=>startImport();$('importBack').onclick=home;$('fileInput').onchange=e=>upload(e.target.files[0]);
 $('searchInput').oninput=()=>{clearTimeout(searchTimer);searchTimer=setTimeout(()=>{state.page=1;loadRecords()},250)};
@@ -227,14 +293,32 @@ let schemaDraft=[];
 function syncSchemaDraft(){schemaDraft=schemaDraft.map((f,i)=>{const row=document.querySelector(`[data-schema-index="${i}"]`);if(!row)return f;return {...f,label:row.querySelector('.schema-label').value,type:row.querySelector('.schema-type')?.value||f.type,required:row.querySelector('.schema-required').checked,options:row.querySelector('.schema-options-input').value.split(',').map(x=>x.trim()).filter(Boolean)}})}
 function renderSchemaFields(){
   $('schemaFields').innerHTML=`<label class="schema-name">Nombre del módulo<input id="schemaName" value="${esc(state.module.schema.name)}" maxlength="80" required></label><p>Los campos existentes conservan sus datos. Los campos nuevos empiezan vacíos.</p>${schemaDraft.map((f,i)=>`<div class="schema-row" data-schema-index="${i}"><label>Nombre del campo<input class="schema-label" value="${esc(f.label)}" maxlength="80" required></label><label>Tipo de dato ${i<state.module.schema.fields.length?`<strong>${esc(({text:'Texto',integer:'Número entero',decimal:'Número decimal',currency:'Importe',date:'Fecha',boolean:'Sí / No',enum:'Opciones'})[f.type])}</strong>`:`<select class="schema-type">${['text','integer','decimal','currency','date','boolean','enum'].map(t=>`<option value="${t}" ${f.type===t?'selected':''}>${esc(({text:'Texto',integer:'Número entero',decimal:'Número decimal',currency:'Importe',date:'Fecha',boolean:'Sí / No',enum:'Opciones'})[t])}</option>`).join('')}</select>`}</label><label class="schema-check"><input class="schema-required" type="checkbox" ${f.required?'checked':''}> Obligatorio</label><label class="schema-options" ${f.type==='enum'?'':'hidden'}>Opciones, separadas por coma<input value="${esc((f.options||[]).join(', '))}" class="schema-options-input" placeholder="Ejemplo: Pendiente, Listo"></label></div>`).join('')}`;
+  $('schemaName').parentElement.insertAdjacentHTML('afterend',`<label class="schema-name">Tipo de planilla<select id="schemaTemplate"><option value="general">Otra planilla</option><option value="habilitaciones">Habilitaciones</option><option value="minimercado">Minimercado</option><option value="corralon">Corralón de materiales</option></select></label>`);
+  $('schemaTemplate').value=state.module.schema.template||'general';
   $('schemaFields').querySelectorAll('.schema-type').forEach(select=>select.onchange=()=>{const row=select.closest('.schema-row');row.querySelector('.schema-options').hidden=select.value!=='enum'});
 }
 $('schemaButton').onclick=()=>{schemaDraft=state.module.schema.fields.map(f=>({...f}));renderSchemaFields();$('schemaDialog').showModal()};
 $('closeSchema').onclick=()=>$('schemaDialog').close();
 $('addFieldButton').onclick=()=>{if(schemaDraft.length>=30)return toast('El módulo admite hasta 30 campos.',true);const moduleName=$('schemaName').value;syncSchemaDraft();const next=Math.max(0,...schemaDraft.map(f=>Number(f.id.slice(1))||0))+1;schemaDraft.push({id:`f${next}`,label:'Nuevo campo',type:'text',required:false,sourceColumn:null});renderSchemaFields();$('schemaName').value=moduleName;$('schemaFields').scrollTop=$('schemaFields').scrollHeight};
-$('schemaForm').onsubmit=async event=>{event.preventDefault();const fields=schemaDraft.map((f,i)=>{const row=document.querySelector(`[data-schema-index="${i}"]`),type=row.querySelector('.schema-type')?.value||f.type;const item={...f,label:row.querySelector('.schema-label').value.trim(),type,required:row.querySelector('.schema-required').checked};if(type==='enum')item.options=row.querySelector('.schema-options-input').value.split(',').map(x=>x.trim()).filter(Boolean);if(type==='decimal'||type==='currency')item.scale=f.scale??2;return item});try{await api(`/api/modules/${state.module.id}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({revision:state.module.schema.revision||1,name:$('schemaName').value.trim(),primaryFieldId:state.module.schema.primaryFieldId,fields})});$('schemaDialog').close();toast('Configuración guardada.');await refreshModules();await openModule(state.module.id)}catch(e){toast(e.message,true)}};
+$('templateFieldsButton').onclick=()=>{
+  const template=$('schemaTemplate').value;
+  if(!['minimercado','corralon'].includes(template)){toast('Los campos sugeridos están disponibles para minimercado y corralón.',true);return;}
+  const moduleName=$('schemaName').value;syncSchemaDraft();
+  let next=Math.max(0,...schemaDraft.map(f=>Number(f.id.slice(1))||0))+1;
+  const suggested=[['Stock actual','decimal',2],['Stock mínimo','decimal',2],['Ventas 30 días','decimal',2],['Días de entrega','integer',null]];
+  let added=0;
+  for(const [label,type,scale] of suggested){
+    if(schemaDraft.some(f=>f.label.toLocaleLowerCase('es-AR')===label.toLocaleLowerCase('es-AR')))continue;
+    if(schemaDraft.length>=30)break;
+    schemaDraft.push({id:`f${next++}`,label,type,scale,required:false,sourceColumn:null});added++;
+  }
+  renderSchemaFields();$('schemaName').value=moduleName;$('schemaTemplate').value=template;
+  toast(added?`${added} campos sugeridos agregados. Guardá la configuración y completá sus datos.`:'No hay espacio o esos campos ya existen.');
+};
+$('schemaForm').onsubmit=async event=>{event.preventDefault();const fields=schemaDraft.map((f,i)=>{const row=document.querySelector(`[data-schema-index="${i}"]`),type=row.querySelector('.schema-type')?.value||f.type;const item={...f,label:row.querySelector('.schema-label').value.trim(),type,required:row.querySelector('.schema-required').checked};if(type==='enum')item.options=row.querySelector('.schema-options-input').value.split(',').map(x=>x.trim()).filter(Boolean);if(type==='decimal'||type==='currency')item.scale=f.scale??2;return item});try{await api(`/api/modules/${state.module.id}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({revision:state.module.schema.revision||1,name:$('schemaName').value.trim(),template:$('schemaTemplate').value,primaryFieldId:state.module.schema.primaryFieldId,fields})});$('schemaDialog').close();toast('Configuración guardada.');await refreshModules();await openModule(state.module.id)}catch(e){toast(e.message,true)}};
 $('reimportButton').onclick=()=>startImport(state.module);
-$('historyButton').onclick=async()=>{try{const history=await api(`/api/modules/${state.module.id}/reimports`);$('historyList').innerHTML=history.length?history.map(run=>`<div class="history-row"><div><strong>${esc(new Date(run.created_at+'Z').toLocaleString('es-AR'))}</strong><p>${run.created} nuevos · ${run.updated} actualizados ${run.undone_at?'· Deshecho':''}</p></div>${canWrite()&&!run.undone_at?`<button class="button secondary" data-undo="${esc(run.id)}" type="button">Deshacer</button>`:''}</div>`).join(''):'<p>Todavía no hay actualizaciones desde Excel.</p>';$('historyList').querySelectorAll('[data-undo]').forEach(b=>b.onclick=async()=>{if(!confirm('¿Deshacer esta actualización? Solo se puede si nadie editó sus registros después.'))return;try{await api(`/api/modules/${state.module.id}/reimports/${b.dataset.undo}`,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});$('historyDialog').close();toast('Actualización deshecha.');await loadRecords();await refreshModules();}catch(e){toast(e.message,true)}});$('historyDialog').showModal()}catch(e){toast(e.message,true)}};
+$('undoImportButton').onclick=async()=>{if(!state.module?.canUndoImport)return;if(!confirm('¿Deshacer esta importación? Se quitará el módulo completo. Esta opción solo aparece si nadie modificó sus datos.'))return;try{await api(`/api/modules/${state.module.id}/undo-import`,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});state.module=null;home();toast('Importación deshecha. Podés volver a subir el Excel.')}catch(e){toast(e.message,true)}};
+$('historyButton').onclick=async()=>{try{const history=await api(`/api/modules/${state.module.id}/reimports`);$('historyList').innerHTML=history.length?history.map(run=>`<div class="history-row"><div><strong>${esc(new Date(run.created_at+'Z').toLocaleString('es-AR'))}</strong><p>${run.created} nuevos · ${run.updated} actualizados ${run.undone_at?'· Deshecho':''}</p></div>${canWrite()&&!run.undone_at?`<button class="button secondary" data-undo="${esc(run.id)}" type="button">Deshacer</button>`:''}</div>`).join(''):'<p>Todavía no hay actualizaciones desde Excel.</p>';$('historyList').querySelectorAll('[data-undo]').forEach(b=>b.onclick=async()=>{if(!confirm('¿Deshacer esta actualización? Solo se puede si nadie editó sus registros después.'))return;try{await api(`/api/modules/${state.module.id}/reimports/${b.dataset.undo}`,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});$('historyDialog').close();toast('Actualización deshecha.');await loadRecords();await refreshModules();await renderModuleAttention();}catch(e){toast(e.message,true)}});$('historyDialog').showModal()}catch(e){toast(e.message,true)}};
 $('closeHistory').onclick=()=>$('historyDialog').close();
 $('exportButton').onclick=async()=>{
   try{

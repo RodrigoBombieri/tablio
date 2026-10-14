@@ -17,6 +17,7 @@ from http.cookies import SimpleCookie
 from urllib.parse import parse_qs, urlparse
 
 from .core import convert_rows, infer_sheet, validate_record, validate_schema, _normalize
+from .insights import analyze as analyze_insights
 from . import store
 from .reimport import plan as plan_reimport
 from .store import (create_record, delete_record, get_module, import_records,
@@ -75,9 +76,9 @@ def _correct_sheet(sheet, preview, body):
             if not row or column>len(preview["fields"]): raise ValueError("La celda corregida no pertenece a la tabla.")
             old=row["cells"].get(column-1)
             if is_formula:
-                if not isinstance(old,dict) or not value.startswith("="):
+                if not isinstance(old,dict) or not value.strip():
                     raise ValueError("Corrección de fórmula inválida.")
-                row["cells"][column-1]={"formula":value,"cached":None}
+                row["cells"][column-1]={"formula":value,"cached":None} if value.startswith("=") else value
             else:
                 if isinstance(old,dict):
                     raise ValueError("Las fórmulas deben corregirse en la lista de fórmulas.")
@@ -184,7 +185,9 @@ class Handler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", "0"))
         if length > limit or length <= 0:
             raise ValueError("El archivo o pedido supera el tamaño permitido.")
-        return self.rfile.read(length)
+        body = self.rfile.read(length)
+        self._body_consumed = True
+        return body
 
     def _request_json(self):
         try: return json.loads(self._body(1024 * 1024))
@@ -373,12 +376,24 @@ class Handler(BaseHTTPRequestHandler):
             (UPLOADS / f"{token}.xlsx").unlink(missing_ok=True)
             store.finish_upload(token,org_id,user["id"])
             return self._json({"moduleId": module_id, "count": len(records)})
-        match = re.fullmatch(r"/api/modules/([a-f0-9-]{36})(?:/(records|export|reimports|views)(?:/([a-f0-9-]{36}))?)?", path)
+        movement_match = re.fullmatch(r"/api/modules/([a-f0-9-]{36})/records/([a-f0-9-]{36})/movements", path)
+        if movement_match and self.command == "POST":
+            self._require_write(role)
+            mid,record_id=movement_match.groups()
+            body=self._request_json()
+            return self._json(store.record_stock_movement(org_id,mid,record_id,body.get("kind"),body.get("quantity"),user["id"]),201)
+        match = re.fullmatch(r"/api/modules/([a-f0-9-]{36})(?:/(records|export|reimports|views|insights|undo-import)(?:/([a-f0-9-]{36}))?)?", path)
         if match:
             mid, action, rid = match.groups()
             module = get_module(org_id,mid)
             if not module: return self._json({"error": "Módulo no encontrado."}, 404)
             schema = module["schema"]
+            if self.command == "POST" and action == "undo-import":
+                self._require_write(role)
+                store.undo_import(org_id,mid,user["id"])
+                return self._json({"undone":True})
+            if self.command == "GET" and action == "insights":
+                return self._json(analyze_insights(schema, record_list(org_id, mid), recent_sales=store.recent_sales(org_id,mid)))
             if self.command == "GET" and not action: return self._json(module)
             if self.command == "PUT" and not action:
                 self._require_write(role)
@@ -449,7 +464,13 @@ class Handler(BaseHTTPRequestHandler):
 
     def _safe(self):
         try: self._route()
-        except PermissionError as exc: self._json({"error":str(exc)},401 if "Iniciá sesión" in str(exc) else 403)
+        except PermissionError as exc:
+            # Read a rejected request body before closing the socket; Windows otherwise
+            # may reset the connection before the client receives the 403 response.
+            length = int(self.headers.get("Content-Length", "0"))
+            if not getattr(self,"_body_consumed",False) and 0 < length <= 6 * 1024 * 1024:
+                self.rfile.read(length)
+            self._json({"error":str(exc)},401 if "Iniciá sesión" in str(exc) else 403)
         except sqlite3.IntegrityError: self._json({"error":"El dato ya existe o no cumple una restricción."},409)
         except (ValueError, SpreadsheetError) as exc: self._json({"error": str(exc)}, 400)
         except Exception:

@@ -35,17 +35,22 @@ def infer_sheet(sheet):
     if not header:
         raise ValueError("No hay encabezados.")
     last_col = max((max(row["cells"]) for row in rows), default=-1)
-    if last_col >= 30:
-        raise ValueError("La tabla supera 30 columnas.")
+    if last_col >= 64:
+        raise ValueError("La tabla supera 64 columnas.")
     labels = []
+    unnamed = []
+    repeated = []
     for col in range(last_col + 1):
         label = str(header.get(col) or "").strip()
         if not label:
-            raise ValueError(f"La columna {col + 1} no tiene encabezado.")
+            label = f"Sin título ({col + 1})"
+            unnamed.append(col)
         if label.casefold() in [item.casefold() for item in labels]:
-            raise ValueError(f"Encabezado duplicado: {label}.")
+            repeated.append(col)
+            label = f"{label} (columna {col + 1})"
         labels.append(label)
-    data_rows = [row for row in rows[1:] if any(_normalize(v) is not None for v in row["cells"].values())]
+    named_cols = set(range(last_col + 1)) - set(unnamed)
+    data_rows = [row for row in rows[1:] if any(_normalize(row["cells"].get(col)) is not None for col in named_cols)]
     if len(data_rows) > 5000:
         raise ValueError("La tabla supera 5.000 registros.")
     fields = []
@@ -75,14 +80,14 @@ def infer_sheet(sheet):
                         canonical, _ = parse_formula(cell["formula"], row["number"], labels)
                         break
                     except ValueError: pass
-            field_type = "decimal"
+            if canonical: field_type = "decimal"
         fields.append({"id": f"f{col + 1}", "label": label, "sourceColumn": col, "type": field_type,
-                       "required": False, "ignored": False, "scale": 2 if field_type == "currency" else 6 if formulas else 3 if field_type == "decimal" else None,
+                       "required": False, "ignored": col in unnamed, "scale": 2 if field_type == "currency" else 6 if canonical else 3 if field_type == "decimal" else None,
                        "currency": "ARS" if field_type == "currency" else None,
                        "options": distinct if enum_suggestion else [],
                        "enumSuggested": enum_suggestion, "emptyCount": len(values)-len(nonempty),
                        "examples": [str(v) for v in nonempty[:5]], "formula": canonical,
-                       "formulaCount": len(formulas)})
+                       "formulaCount": len(formulas) if canonical else 0})
     issues = []
     for row in data_rows:
         for col, cell in row["cells"].items():
@@ -94,10 +99,22 @@ def infer_sheet(sheet):
                 if isinstance(cell.get("cached"), str) and cell["cached"].startswith(("#REF!", "#DIV/0!", "#VALUE!", "#NUM!", "#NAME?", "#N/A")):
                     raise ValueError(f"Excel informa {cell['cached']} en esta fórmula.")
             except ValueError as exc:
+                cached = _normalize(cell)
+                excel_error = isinstance(cached, str) and cached.startswith(("#REF!", "#DIV/0!", "#VALUE!", "#NUM!", "#NAME?", "#N/A"))
+                if not fields[col].get("formula") and cached is not None and not excel_error:
+                    continue
                 issues.append({"row": row["number"], "column": col+1, "field": labels[col],
                                "formula": cell["formula"], "message": str(exc)})
+    warnings = []
+    if unnamed: warnings.append(f"{len(unnamed)} columnas sin título quedaron desmarcadas. Revisalas antes de importar.")
+    if repeated: warnings.append(f"{len(repeated)} encabezados repetidos recibieron un nombre distinto.")
+    fallback = sum(1 for row in data_rows for col, cell in row["cells"].items()
+                   if isinstance(cell, dict) and col < len(fields) and not fields[col].get("formula") and _normalize(cell) is not None)
+    if fallback: warnings.append(f"{fallback} fórmulas no compatibles se importarán con su último valor guardado en Excel; no se recalcularán en Tablio.")
+    if sheet.get("mergedRanges"): warnings.append(f"La hoja contiene {len(sheet['mergedRanges'])} área(s) combinada(s); revisá esos datos.")
+    if not data_rows: warnings.append("La hoja no contiene registros.")
     return {"sheet": sheet["name"], "rowCount": len(data_rows), "fields": fields,
-            "formulaIssues": issues, "warnings": [] if data_rows else ["La hoja no contiene registros."], "schemaVersion": 1}
+            "formulaIssues": issues, "warnings": warnings, "schemaVersion": 1}
 
 
 def validate_schema(candidate, source):
@@ -106,6 +123,9 @@ def validate_schema(candidate, source):
     name = str(candidate.get("name", "")).strip()
     if not 1 <= len(name) <= 80:
         raise ValueError("El módulo necesita un nombre de 1 a 80 caracteres.")
+    template = candidate.get("template", "general")
+    if template not in {"general", "habilitaciones", "minimercado", "corralon"}:
+        raise ValueError("Elegí una plantilla válida.")
     fields = candidate.get("fields", [])
     if not isinstance(fields, list) or not 1 <= len(fields) <= 30:
         raise ValueError("El módulo necesita entre 1 y 30 campos.")
@@ -146,7 +166,8 @@ def validate_schema(candidate, source):
         if field.get("formula") and not dependencies(field["formula"]).issubset(ids):
             raise ValueError(f"Incluí las columnas referenciadas por {field['label']}.")
     _formula_order(clean)
-    return {"schemaVersion": 1, "revision": 1, "name": name, "primaryFieldId": primary, "fields": clean}
+    return {"schemaVersion": 1, "revision": 1, "name": name, "template": template,
+            "primaryFieldId": primary, "fields": clean}
 
 
 def _formula_order(fields):
@@ -223,13 +244,20 @@ def convert(value, field):
 
 def convert_rows(source_sheet, schema):
     records, errors = [], []
+    selected_cols = [f["sourceColumn"] for f in schema["fields"]]
     for row in source_sheet["rows"][1:]:
-        if not any(_normalize(v) is not None for v in row["cells"].values()):
+        if not any(_normalize(row["cells"].get(col)) is not None for col in selected_cols):
             continue
         record = {}
         for field in schema["fields"]:
             if field.get("formula"): continue
             raw = row["cells"].get(field["sourceColumn"])
+            if isinstance(raw, dict) and "formula" in raw:
+                cached = _normalize(raw)
+                if cached is None or (isinstance(cached, str) and cached.startswith(("#REF!", "#DIV/0!", "#VALUE!", "#NUM!", "#NAME?", "#N/A"))):
+                    errors.append(error("INVALID_FORMULA", "La fórmula no tiene un valor válido guardado en Excel. Escribí un valor fijo o excluí la columna.",
+                                        row["number"], field["sourceColumn"] + 1, field["label"]))
+                    continue
             try:
                 record[field["id"]] = convert(raw, field)
             except ValueError as exc:
