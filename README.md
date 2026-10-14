@@ -1,62 +1,77 @@
-# Tablio
+<p align="center">
+  <img src="docs/assets/tablio-logo.svg" alt="Tablio — De planilla a sistema" width="560">
+</p>
 
-**De planilla a sistema.**
+<p align="center">
+  <strong>Convertí una planilla de Excel en un sistema sencillo para trabajar todos los días.</strong><br>
+  Importá, revisá y actualizá tus datos desde el navegador, sin abandonar el archivo que ya usás.
+</p>
 
-Tablio convierte una tabla de Excel en un módulo web para consultar y editar registros. Esta implementación cubre el Proof of Concept V0 definido en el [Project Brief](Tablio%20%E2%80%94%20Project%20Brief.md). Funciona en un equipo local, con datos ficticios o anonimizados.
+> **Estado:** Proof of Concept funcional para uso local. El despliegue público con HTTPS aún necesita servidor, dominio y validación operativa.
 
-## Ejecutar en Visual Studio Code
+## Qué podés hacer
 
-Requisito: Python 3.11 o superior. Abrí **`C:\Users\Rodrigo\Escritorio\Repositorio Git\tablio`** en VS Code y ejecutá los comandos en su terminal. Si tenías un servidor de Tablio abierto desde `C:\Users\Rodrigo\Escritorio\Tablio`, detenelo primero con Ctrl+C: esa copia anterior puede mostrar errores de «ruta no encontrada» o rechazar celdas combinadas. La primera vez, creá el propietario; el comando pedirá una contraseña de al menos 12 caracteres:
+| | Función |
+|---|---|
+| 📥 | **Importar XLSX con revisión previa.** Elegí la hoja, comprobá tipos y datos, corregí fórmulas simples o excluí una fila problemática. Las celdas combinadas se señalan para revisión. |
+| 🗂️ | **Trabajar con módulos.** Consultá, buscá, filtrá, ordená, editá y exportá registros. Podés configurar campos y guardar vistas personales. |
+| 🔄 | **Actualizar desde Excel.** Compará registros nuevos, modificados y sin cambios antes de guardar. Si un identificador se repite, Tablio puede sugerir una combinación de hasta tres columnas. El historial permite deshacer una actualización cuando los registros afectados no se editaron después. |
+| 📦 | **Seguir el trabajo diario.** Registrá ventas y entradas de mercadería en módulos con stock; consultá avisos y sugerencias de reposición explicadas. |
+| 🔐 | **Separar equipos y datos.** Inicio de sesión, roles, organizaciones aisladas, actividad y copias de seguridad locales. |
 
-```powershell
-python -m app.admin --email vos@ejemplo.com --name "Tu nombre" --organization "Mi organización"
-```
+## Empezar en tu computadora
 
-Después ejecutá:
+Necesitás **Python 3.11 o superior**. Abrí la carpeta del repositorio en Visual Studio Code y usá su terminal. No hay paquetes externos que instalar.
 
-```powershell
-python -m app.server
-```
+1. Creá la cuenta propietaria (solo la primera vez):
 
-También podés usar **Ejecutar y depurar → Iniciar Tablio (repositorio Git)** en VS Code. Al iniciar, la terminal muestra la ruta del código activo; verificá que termine en `Repositorio Git\tablio`. Si no coincide, detené ese servidor con Ctrl+C y abrí la carpeta correcta en VS Code.
+   ```powershell
+   python -m app.admin --email vos@ejemplo.com --name "Tu nombre" --organization "Mi organización"
+   ```
 
-Abrí `http://127.0.0.1:8000` en el navegador. No hay paquetes externos que instalar. La base SQLite se crea automáticamente en `data/tablio.sqlite3`. Las importaciones pendientes se guardan temporalmente en `uploads/` y vencen a las 24 horas. Ambas rutas quedan fuera del control de versiones.
+   El comando te pedirá una contraseña de al menos 12 caracteres. Usá ese correo para iniciar sesión.
 
-Para verificar el flujo:
+2. Iniciá Tablio:
+
+   ```powershell
+   python -m app.server
+   ```
+
+   En VS Code también podés elegir **Ejecutar y depurar → Iniciar Tablio (repositorio Git)**.
+
+3. Abrí **[http://127.0.0.1:8000](http://127.0.0.1:8000)**. Para detener el servidor, presioná **Ctrl+C** en la terminal. Si el puerto ya está ocupado, Tablio lo indica en lugar de iniciar otra instancia.
+
+### Tu primera importación
+
+Probá con los archivos sintéticos [minimercado.xlsx](outputs/01a06e97-c8d6-7c20-aebd-4c816513d8af/minimercado.xlsx) o [corralon_materiales.xlsx](outputs/01a06e97-c8d6-7c20-aebd-4c816513d8af/corralon_materiales.xlsx):
+
+1. Elegí **Importar una planilla** y seleccioná un archivo.
+2. En **Revisar estructura**, comprobá las columnas y pulsá **Comprobar datos**. Si hay errores, corregí la celda o excluí solo la fila afectada.
+3. Pulsá **Guardar módulo**. Después podés buscar registros, editarlos o usar **Actualizar desde Excel** para revisar nuevos datos antes de aplicarlos.
+
+Las fórmulas aritméticas simples de la misma fila se pueden recalcular. Si una fórmula no es compatible pero Excel guardó un resultado válido, Tablio avisa que ese valor se importará como fijo.
+
+## Datos y límites actuales
+
+- El servidor local escucha en `127.0.0.1:8000` y guarda la base SQLite en `data/tablio.sqlite3`.
+- Los XLSX pendientes se guardan de forma privada en `uploads/` y vencen a las 24 horas. `data/`, `uploads/` y `backups/` no se versionan.
+- Cada archivo puede ocupar hasta **5 MiB**; el lector admite hasta **5.000 registros** y **64 columnas** por hoja.
+- Docker Compose y Caddy preparan HTTPS, pero el despliegue público sigue pendiente de infraestructura y pruebas. Consultá [acceso, backups y despliegue](docs/SECURITY_DEPLOYMENT.md) antes de usar datos reales fuera de una prueba controlada.
+
+## Documentación
+
+| Documento | Para qué sirve |
+|---|---|
+| [Project Brief](Tablio%20%E2%80%94%20Project%20Brief.md) | Visión, alcance y criterios del producto. |
+| [Planificación](docs/PLANNING.md) | Avances realizados y trabajo pendiente. |
+| [Arquitectura](docs/ARCHITECTURE.md) | Componentes y flujo de datos. |
+| [Decisiones](docs/DECISIONS.md) | Motivos de las elecciones técnicas y de producto. |
+| [Archivos de prueba](docs/FIXTURES.md) | Contenido de los XLSX sintéticos incluidos. |
+
+Para ejecutar las pruebas:
 
 ```powershell
 python -m unittest discover -s tests -v
 ```
 
-Si el puerto 8000 está ocupado, configurá `TABLIO_PORT` antes de iniciar el servidor.
-
-## Primer recorrido
-
-1. Seleccioná **Importar una planilla**.
-2. Elegí [minimercado.xlsx](outputs/01a06e97-c8d6-7c20-aebd-4c816513d8af/minimercado.xlsx) o [corralon_materiales.xlsx](outputs/01a06e97-c8d6-7c20-aebd-4c816513d8af/corralon_materiales.xlsx).
-3. Revisá los tipos de campo. Para categorías, rubros, unidad y estado, podés seleccionar **Opciones** y confirmar la lista separada por comas.
-4. Elegí **Comprobar datos**. Si hay celdas o fórmulas con errores, corregilas por fila y campo desde la misma pantalla y repetí la comprobación. Se admiten operaciones `+`, `-`, `*`, `/`, paréntesis y referencias de la misma fila, incluidas referencias de tabla.
-5. Guardá el módulo. Luego probá búsqueda, filtros, orden, columnas visibles, vistas guardadas, edición y exportación. Los campos calculados se actualizan al editar sus entradas y se exportan como fórmulas.
-6. Desde el módulo, elegí **Actualizar desde Excel**, indicá la columna que identifica cada registro y revisá cuántos se agregarán o cambiarán. Las filas ausentes del archivo quedan intactas. **Historial** permite deshacer una actualización si esos registros no se editaron después.
-
-**Configurar campos** permite cambiar nombres, marcar campos obligatorios y agregar otros opcionales. La sección **Usuarios** permite invitar personas con un enlace privado o generar un enlace para recuperar el acceso. Propietarios y administradores pueden consultar **Actividad**.
-
-Los datos de prueba son sintéticos. La [guía de los dos XLSX](docs/FIXTURES.md) indica sus columnas y valores especiales.
-
-## Estructura
-
-```text
-app/       Servidor local, análisis, validación y persistencia
-web/       Interfaz responsive en HTML, CSS y JavaScript
-tests/     Pruebas del recorrido con ambos XLSX
-docs/      Planificación, arquitectura y decisiones
-outputs/   Dos archivos Excel de prueba
-data/      Base local creada al ejecutar (ignorada)
-uploads/   Archivos temporales de importación (ignorados)
-```
-
-El [registro de decisiones](docs/DECISIONS.md) explica por qué la implementación local usa Python y SQLite en esta etapa. La [planificación](docs/PLANNING.md) distingue las funciones implementadas de las pendientes del MVP. [Acceso, backups y despliegue](docs/SECURITY_DEPLOYMENT.md) describe los roles, la migración de datos V0, las copias y la preparación de HTTPS.
-
-## Límite de uso
-
-La app local escucha en `127.0.0.1`. Ahora exige inicio de sesión y aplica permisos por organización. El despliegue con HTTPS está configurado mediante Docker Compose y Caddy, pero sigue pendiente de un servidor, dominio y verificación operativa. Antes de usar datos reales fuera de una prueba controlada, prepará copias externas, restauración, monitoreo y revisión de la infraestructura.
+El código está organizado en `app/` (servidor y datos), `web/` (interfaz), `tests/` (pruebas) y `docs/` (documentación).
