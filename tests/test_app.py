@@ -12,6 +12,7 @@ from app import store
 from app import backup
 from app.core import convert_rows, infer_sheet
 from app.formulas import parse_formula, evaluate
+from app.reimport import plan as plan_reimport, suggest_key_fields
 from app.server import Handler, TablioHTTPServer
 from app.xlsx_io import SpreadsheetError, read_workbook, write_workbook
 from http.server import ThreadingHTTPServer
@@ -21,6 +22,16 @@ FIXTURES = ROOT / 'outputs' / '01a06e97-c8d6-7c20-aebd-4c816513d8af'
 
 
 class AppTests(unittest.TestCase):
+    def test_composite_key_suggestion_is_generic_for_three_columns(self):
+        values=[{'f1':'A','f2':'Norte','f3':1}, {'f1':'A','f2':'Norte','f3':2},
+                {'f1':'A','f2':'Sur','f3':1}, {'f1':'A','f2':'Sur','f3':2}]
+        existing=[{'id':str(__import__('uuid').uuid4()),'values':row} for row in values]
+        incoming=[{'row':i+2,'values':row} for i,row in enumerate(values+[{'f1':'B','f2':'Norte','f3':1}])]
+        fields=suggest_key_fields(existing,incoming,'f1',['f1','f2','f3'])
+        self.assertEqual(fields,['f1','f2','f3'])
+        result=plan_reimport(existing,incoming,fields,str(__import__('uuid').uuid4()),{'f1','f2','f3'})
+        self.assertEqual((result['created'],result['updated'],result['unchanged'],result['conflicts']),(1,0,4,[]))
+
     @unittest.skipUnless(os.name == 'nt', 'Windows port binding')
     def test_second_server_cannot_bind_to_same_port(self):
         first=TablioHTTPServer(('127.0.0.1',0),Handler)
@@ -362,6 +373,33 @@ class AppTests(unittest.TestCase):
         status,conflict=self.request('/api/reimport/preview','POST',{'token':upload['token'],'sheet':upload['sheet'],'moduleId':mid,'keyFieldId':'f1'})
         self.assertEqual(status,422)
         self.assertEqual(conflict['conflictCount'],1)
+
+    def test_reimport_suggests_second_column_for_product_variants(self):
+        schema={'schemaVersion':1,'revision':1,'name':'Variantes','primaryFieldId':'f2','fields':[
+            {'id':'f1','label':'COD.','type':'integer','required':False,'sourceColumn':0},
+            {'id':'f2','label':'PRODUCTO','type':'text','required':False,'sourceColumn':1},
+            {'id':'f3','label':'COLOR','type':'text','required':False,'sourceColumn':2}]}
+        original=[{'f1':1074,'f2':'Poleras','f3':'Manteca'},
+                  {'f1':1074,'f2':'Poleras','f3':'Ladrillo'},
+                  {'f1':1074,'f2':'Poleron','f3':'Marron'},
+                  {'f1':1074,'f2':'Poleron','f3':'Negro'}]
+        mid=store.import_records(self.org_id,str(__import__('uuid').uuid4()),schema,original)
+        raw=write_workbook('Variantes',['COD.','PRODUCTO','COLOR'],
+                           [[r['f1'],r['f2'],r['f3']] for r in original]+[[1080,'Nuevo','Azul']])
+        status,upload=self.request('/api/analyze','POST',raw,'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        self.assertEqual(status,200,upload)
+        body={'token':upload['token'],'sheet':'Variantes','moduleId':mid,'keyFieldId':'f1'}
+        status,conflict=self.request('/api/reimport/preview','POST',body)
+        self.assertEqual(status,422,conflict)
+        self.assertEqual(conflict['suggestedKeyFieldIds'],['f1','f3'])
+        body['keyFieldIds']=['f1','f3']
+        status,review=self.request('/api/reimport/preview','POST',body)
+        self.assertEqual(status,200,review)
+        self.assertEqual((review['created'],review['updated'],review['unchanged']),(1,0,4))
+        status,saved=self.request('/api/reimport/confirm','POST',{**body,'digest':review['digest']})
+        self.assertEqual(status,200,saved)
+        self.assertEqual((saved['created'],saved['updated']), (1,0))
+        self.assertEqual(len(store.record_list(self.org_id,mid)),5)
 
     def test_reimport_rechecks_preview_and_denies_other_organization(self):
         schema={'schemaVersion':1,'revision':1,'name':'Control','primaryFieldId':'f1','fields':[

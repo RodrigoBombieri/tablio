@@ -134,7 +134,7 @@ Revisar estas prioridades con usuarios adultos antes de implementarlas; no son f
 
 ### Mejoras posteriores al PoC
 
-- [x] Reimportar un XLSX sobre un módulo existente mediante una columna identificadora, con vista previa de altas, cambios, filas sin cambios y conflictos por clave duplicada. No se borran filas ausentes.
+- [x] Reimportar un XLSX sobre un módulo existente mediante una a tres columnas identificadoras, con vista previa de altas, cambios, filas sin cambios y conflictos por clave duplicada. Proponer una combinación única cuando la elegida se repite. No se borran filas ausentes.
 - [x] Aplicar la reimportación en una transacción, detectar cambios entre vista previa y confirmación, admitir reintentos sin duplicar y deshacer una actualización si sus registros no se editaron después.
 - [x] Comprobar todas las filas antes de la importación inicial y corregir valores y fórmulas por fila y campo desde la revisión.
 - [x] Configurar nombres, obligatoriedad y opciones de campos existentes; agregar campos opcionales sin perder datos; guardar vistas personales con filtros, orden y columnas visibles.
@@ -166,5 +166,6 @@ Revisar estas prioridades con usuarios adultos antes de implementarlas; no son f
 | 2026-10-13 | Primera hoja real de habilitaciones, exclusión por columna, plantillas, avisos, movimientos de stock y reposición explicada | `app/xlsx_io.py`, `app/core.py`, `app/insights.py`, `app/store.py`, `web/`, validación sin incluir datos privados |
 | 2026-10-14 | Exclusión individual y reversible de filas con fórmulas conflictivas; comprobación de importación con celdas combinadas y ruta de guardado | `app/server.py`, `web/app.js`, `tests/test_app.py`; prueba HTTP con filas excluidas y libro real: 1.922 registros guardados en base temporal; inicio verificable desde VS Code |
 | 2026-10-14 | Diagnóstico en la app activa: dos servidores Windows compartían el puerto 8000 y respondían con versiones distintas; se detuvo el antiguo y se impidió un segundo enlace al mismo puerto | `app/server.py`, `tests/test_app.py`; importación y validación del libro real comprobadas en la interfaz local, sin confirmar un módulo nuevo |
+| 2026-10-14 | Actualización desde Excel con identificación compuesta genérica y sugerencia de la menor combinación única | `app/reimport.py`, `app/server.py`, `web/app.js`, pruebas HTTP y de tres campos; el libro real se revisó sin modificar el módulo |
 
 Actualizar las casillas y agregar evidencia en esta sección cada vez que se complete una tarea. Registrar cambios de alcance o arquitectura también en DECISIONS.md. No marcar implementación o pruebas como completadas por haberlas documentado.

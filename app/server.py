@@ -20,7 +20,7 @@ from urllib.parse import parse_qs, urlparse
 from .core import convert_rows, infer_sheet, validate_record, validate_schema, _normalize
 from .insights import analyze as analyze_insights
 from . import store
-from .reimport import plan as plan_reimport
+from .reimport import plan as plan_reimport, suggest_key_fields
 from .store import (create_record, delete_record, get_module, import_records,
                     initialize, module_list, record_list, update_record)
 from .xlsx_io import SpreadsheetError, read_workbook, write_workbook
@@ -140,9 +140,12 @@ def _review_reimport(preview,sheet,module,body,org_id,token):
     for field in imported:
         if str(headers.get(field["sourceColumn"],"")).strip().casefold()!=field.get("sourceLabel",field["label"]).casefold():
             raise ValueError(f"La columna {field['sourceColumn']+1} debe ser {field.get('sourceLabel',field['label'])}. Usá un archivo con la misma estructura.")
-    key_field=body.get("keyFieldId")
-    if key_field not in {f["id"] for f in imported if not f.get("formula")}:
-        raise ValueError("Elegí una columna identificadora del archivo.")
+    key_fields=body.get("keyFieldIds",[body.get("keyFieldId")])
+    allowed_keys={f["id"] for f in imported if not f.get("formula")}
+    if (not isinstance(key_fields,list) or not 1 <= len(key_fields) <= 3
+            or any(not isinstance(field_id,str) or field_id not in allowed_keys for field_id in key_fields)
+            or len(set(key_fields)) != len(key_fields)):
+        raise ValueError("Elegí hasta tres columnas distintas para identificar cada fila.")
     converted,errors=convert_rows(sheet,{"fields":imported})
     _annotate_formula_errors(errors,sheet)
     rows=[r for r in sheet["rows"][1:] if any(_normalize(v) is not None for v in r["cells"].values())]
@@ -151,7 +154,13 @@ def _review_reimport(preview,sheet,module,body,org_id,token):
         for row,values in zip(rows,converted):
             merged={f["id"]:values.get(f["id"]) if f in imported else None for f in schema["fields"]}
             incoming.append({"row":row["number"],"values":merged})
-    result=plan_reimport(store.record_list(org_id,module["id"]),incoming,key_field,token,{f["id"] for f in imported}) if not errors else None
+    existing=store.record_list(org_id,module["id"]) if not errors else []
+    result=plan_reimport(existing,incoming,key_fields,token,{f["id"] for f in imported}) if not errors else None
+    if result:
+        result["keyFieldIds"]=key_fields
+        if result["conflicts"] and len(key_fields)<3:
+            suggestion=suggest_key_fields(existing,incoming,key_fields[0],[f["id"] for f in imported if f["id"] in allowed_keys])
+            if suggestion: result["suggestedKeyFieldIds"]=suggestion
     if result and not result["conflicts"]:
         for change in result["changes"]:
             try: validate_record(change["new"],schema)
@@ -373,13 +382,15 @@ class Handler(BaseHTTPRequestHandler):
             preview,sheet=_preview(token,body.get("sheet"),org_id,user["id"])
             errors,result=_review_reimport(preview,sheet,module,body,org_id,token)
             if errors: return self._json({"errors":errors[:100],"errorCount":len(errors)},422)
-            if result["conflicts"]: return self._json({"conflicts":result["conflicts"][:100],"conflictCount":len(result["conflicts"])},422)
+            if result["conflicts"]: return self._json({"conflicts":result["conflicts"][:100],"conflictCount":len(result["conflicts"]),
+                                                       "suggestedKeyFieldIds":result.get("suggestedKeyFieldIds")},422)
             if path.endswith("/preview"):
                 return self._json({"created":result["created"],"updated":result["updated"],"unchanged":result["unchanged"],
                                    "changes":[{"action":c["action"],"row":c["row"],"key":c["key"],"old":c["old"],"new":c["new"]} for c in result["changes"][:20]],"digest":result["digest"]})
             if body.get("digest")!=result["digest"]:
                 raise ValueError("La vista previa cambió. Revisá los cambios nuevamente.")
-            store.apply_reimport(org_id,mid,token,user["id"],body["keyFieldId"],result["changes"])
+            key_fields=result["keyFieldIds"]
+            store.apply_reimport(org_id,mid,token,user["id"],key_fields[0] if len(key_fields)==1 else json.dumps(key_fields),result["changes"])
             (UPLOADS / f"{token}.xlsx").unlink(missing_ok=True)
             store.finish_upload(token,org_id,user["id"])
             return self._json({"moduleId":mid,"runId":token,"created":result["created"],"updated":result["updated"],"unchanged":result["unchanged"]})
