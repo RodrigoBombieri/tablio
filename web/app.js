@@ -1,5 +1,6 @@
 const $ = id => document.getElementById(id);
-const state = {modules:[],preview:null,module:null,page:1,editing:null,auth:null,organizationId:null,importTarget:null,reviewDigest:null,visibleColumns:null,views:[],excludedRows:new Set()};
+const state = {modules:[],preview:null,module:null,page:1,editing:null,auth:null,organizationId:null,importTarget:null,reviewDigest:null,visibleColumns:null,views:[],excludedRows:new Set(),view:"home",compact:true,expanded:false,saving:false,deleting:false};
+let recordsRequest=0,moduleRequest=0;
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
 async function api(path, options={}) {
@@ -15,7 +16,22 @@ function toast(message, isError=false) {
   const node=$('toast'); node.textContent=message; node.className=isError?'error':''; node.style.display='block';
   clearTimeout(toast.timer); toast.timer=setTimeout(()=>node.style.display='none',4600);
 }
-function showView(name){for(const id of ['homeView','importView','moduleView']) $(id).hidden=id!==name+'View'; $('homeButton').classList.toggle('active',name==='home');}
+function updateNavigation(){
+  $('homeButton').classList.toggle('active',state.view==='home');
+  $('navImport').classList.toggle('active',state.view==='import');
+  $('moduleNav').querySelectorAll('[data-id]').forEach(node=>{
+    const active=state.view==='module'&&node.dataset.id===state.module?.id;
+    node.classList.toggle('active',active);
+    if(active)node.setAttribute('aria-current','page');else node.removeAttribute('aria-current');
+  });
+}
+function showView(name){
+  state.view=name;
+  if(name!=='module'){recordsRequest++;moduleRequest++;setExpanded(false);}
+  for(const id of ['homeView','importView','moduleView']) $(id).hidden=id!==name+'View';
+  updateNavigation();
+}
+
 function currentOrg(){return state.auth?.organizations.find(o=>o.id===state.organizationId)}
 function canWrite(){return ['owner','admin','editor'].includes(currentOrg()?.role)}
 function renderAccount(){
@@ -23,7 +39,7 @@ function renderAccount(){
   $('sidebarOrg').textContent=currentOrg()?.name||'Organización';$('sidebarUser').textContent=state.auth.user.name;
   $('usersButton').hidden=currentOrg()?.role!=='owner';
   $('activityButton').hidden=!['owner','admin'].includes(currentOrg()?.role);
-  $('startImport').hidden=!canWrite();$('newRecordButton').hidden=!canWrite();$('reimportButton').hidden=!canWrite();
+  $('startImport').hidden=!canWrite();$('navImport').hidden=!canWrite();$('newRecordButton').hidden=!canWrite();$('reimportButton').hidden=!canWrite();
   $('appShell').hidden=false;$('loginView').hidden=true;$('accessView').hidden=true;
 }
 async function boot(){
@@ -52,12 +68,15 @@ async function login(event){
   try{await api('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:$('loginEmail').value,password:$('loginPassword').value})});$('loginPassword').value='';await boot();}
   catch(e){$('loginError').textContent=e.message;}
 }
-async function logout(){try{await api('/api/logout',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});}catch(e){}state.auth=null;state.organizationId=null;await boot();}
+async function logout(){try{await api('/api/logout',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});}catch(e){}recordsRequest++;moduleRequest++;setExpanded(false);state.auth=null;state.organizationId=null;await boot();}
 async function refreshModules(){
   state.modules=await api('/api/modules');
-  $('moduleNav').innerHTML=state.modules.map(m=>`<button data-id="${esc(m.id)}" type="button">▦ <span>${esc(m.name)}</span></button>`).join('');
-  $('moduleCards').innerHTML=state.modules.length?state.modules.map(m=>`<button class="module-card" data-id="${esc(m.id)}" type="button"><span class="card-icon">▦</span><strong>${esc(m.name)}</strong><small>${m.count} registros · Abrir módulo →</small></button>`).join(''):'<div class="empty">Todavía no hay módulos. Importá una planilla para empezar.</div>';
+  $('moduleNav').innerHTML=state.modules.map(m=>`<button data-id="${esc(m.id)}" title="${esc(m.name)}" type="button">▦ <span>${esc(m.name)}</span><span class="nav-count">${m.count}</span></button>`).join('');
+  $('moduleCards').innerHTML=state.modules.length?state.modules.map(m=>`<button class="module-card" data-id="${esc(m.id)}" type="button"><span class="card-top"><span class="card-icon" aria-hidden="true">▦</span><span class="card-arrow" aria-hidden="true">↗</span></span><strong title="${esc(m.name)}">${esc(m.name)}</strong><small>${m.count.toLocaleString('es-AR')} registros · Abrir módulo</small></button>`).join(''):'<div class="empty">Tu próximo sistema empieza con una planilla.<br>Importá un archivo Excel para crear tu primer módulo.</div>';
   document.querySelectorAll('[data-id]').forEach(node=>node.addEventListener('click',()=>openModule(node.dataset.id)));
+  $('moduleCount').textContent=state.modules.length.toLocaleString('es-AR');
+  $('recordCount').textContent=state.modules.reduce((sum,m)=>sum+m.count,0).toLocaleString('es-AR');
+  updateNavigation();
   renderHomeAttention();
 }
 async function renderHomeAttention(){
@@ -115,7 +134,7 @@ function renderReview(){
   const fields=p.fields.map((f,i)=>`<tr data-index="${i}"><td><input type="checkbox" class="include" ${f.ignored?'':'checked'} aria-label="Incluir ${esc(f.label)}"></td><td><input type="text" class="label" value="${esc(f.label)}" aria-label="Etiqueta de ${esc(f.label)}"><br><small>Columna ${f.sourceColumn+1}${f.formulaCount?' · Calculada':''}</small></td><td><select class="type" aria-label="Tipo de ${esc(f.label)}" ${f.formulaCount?'disabled':''}>${['text','integer','decimal','currency','date','boolean','enum'].map(t=>`<option value="${t}" ${t===f.type?'selected':''}>${({text:'Texto',integer:'Entero',decimal:'Decimal',currency:'Importe',date:'Fecha',boolean:'Sí / No',enum:'Opciones'})[t]}</option>`).join('')}</select></td><td><input type="checkbox" class="required" ${f.required?'checked':''} aria-label="Obligatorio ${esc(f.label)}"></td><td><input type="number" min="0" max="6" class="scale" value="${f.scale??2}" aria-label="Decimales de ${esc(f.label)}"></td><td><input type="text" class="options" value="${esc(f.options.join(', '))}" placeholder="Separadas por coma" aria-label="Opciones de ${esc(f.label)}"></td><td><small>${f.emptyCount} vacíos<br>${esc(f.formula?'='+f.formula:f.examples.slice(0,2).join(' · '))}</small></td></tr>`).join('');
   const issues=p.formulaIssues||[];
   const issueList=formulaIssueMarkup(issues);
-  $('reviewPanel').innerHTML=`<div class="panel"><div class="review-header"><div><h2>Revisá la estructura</h2><p>${p.rowCount} registros · ${p.fields.length} columnas detectadas</p></div><button class="button secondary" id="changeFile" type="button">Cambiar archivo</button></div><div class="review-content"><label for="sheetSelect">Hoja del libro</label><select class="name-input" id="sheetSelect">${p.sheets.map(s=>`<option ${s===p.sheet?'selected':''}>${esc(s)}</option>`).join('')}</select><label for="moduleName">Nombre del módulo</label><input class="name-input" id="moduleName" value="${esc(p.sheet)}" maxlength="80"><div class="table-scroll"><table class="field-table"><thead><tr><th>Usar</th><th>Columna</th><th>Tipo</th><th>Obligatorio</th><th>Decimales</th><th>Opciones</th><th>Muestra</th></tr></thead><tbody>${fields}</tbody></table></div>${issueList}<p class="upload-note">Revisá las opciones y los tipos. Los importes se interpretan en ARS. Podés comprobar todas las filas antes de guardar.</p><div id="importErrors" role="alert"></div><div id="dataCorrections"></div><div id="sampleRows"></div></div><div class="review-actions"><span class="hint">Ningún registro se guardará si hay errores.</span><div><button class="button secondary" id="validateImport" type="button">Comprobar datos</button> <button class="button primary" id="confirmImport" type="button">Guardar módulo →</button></div></div></div>`;
+  $('reviewPanel').innerHTML=`<div class="panel"><div class="review-header"><div><h2>Revisá la estructura</h2><p>${p.rowCount} registros · ${p.fields.length} columnas detectadas</p></div><button class="button secondary" id="changeFile" type="button">Cambiar archivo</button></div><div class="review-content"><label for="sheetSelect">Hoja del libro</label><select class="name-input" id="sheetSelect">${p.sheets.map(s=>`<option ${s===p.sheet?'selected':''}>${esc(s)}</option>`).join('')}</select><label for="moduleName">Nombre del módulo</label><input class="name-input" id="moduleName" value="${esc(p.sheet)}" maxlength="80"><details class="review-help"><summary>¿Cómo elijo los tipos de columna?</summary><p><strong>Texto:</strong> nombres y códigos con ceros iniciales. <strong>Entero / Decimal:</strong> cantidades. <strong>Importe:</strong> valores en ARS. <strong>Opciones:</strong> lista separada por comas. Marcá <strong>Obligatorio</strong> para exigir un valor.</p></details><div class="table-scroll" role="region" aria-label="Configuración de columnas, desplazable" tabindex="0"><table class="field-table"><thead><tr><th>Usar</th><th>Columna</th><th>Tipo</th><th>Obligatorio</th><th>Decimales</th><th>Opciones</th><th>Muestra</th></tr></thead><tbody>${fields}</tbody></table></div>${issueList}<p class="upload-note">Revisá las opciones y los tipos. Los importes se interpretan en ARS. Podés comprobar todas las filas antes de guardar.</p><div id="importErrors" role="alert"></div><div id="dataCorrections"></div><div id="sampleRows"></div></div><div class="review-actions"><span class="hint">Ningún registro se guardará si hay errores.</span><div><button class="button secondary" id="validateImport" type="button">Comprobar datos</button> <button class="button primary" id="confirmImport" type="button">Guardar módulo →</button></div></div></div>`;
   const suggested=p.fields.some(f=>/habilitaci[oó]n|factibilidad/i.test(f.label))?'habilitaciones':'general';
   $('moduleName').insertAdjacentHTML('afterend',`<label for="templateSelect">¿Qué tipo de planilla es?</label><select class="name-input" id="templateSelect"><option value="general">Otra planilla</option><option value="habilitaciones" ${suggested==='habilitaciones'?'selected':''}>Habilitaciones</option><option value="minimercado">Minimercado</option><option value="corralon">Corralón de materiales</option></select>${(p.warnings||[]).length?`<div class="import-warnings"><strong>Revisá estos detalles del Excel</strong><ul>${p.warnings.map(w=>`<li>${esc(w)}</li>`).join('')}</ul></div>`:''}`);
   $('changeFile').onclick=()=>startImport();
@@ -128,6 +147,7 @@ function renderReview(){
   $('sheetSelect').onchange=async()=>{try{state.preview=await api(`/api/preview?token=${encodeURIComponent(p.token)}&sheet=${encodeURIComponent($('sheetSelect').value)}`);state.excludedRows.clear();renderReview();}catch(e){toast(e.message,true)}};
   $('confirmImport').onclick=confirmImport;
   $('validateImport').onclick=validateImport;
+  document.querySelectorAll('.field-table tbody tr').forEach(row=>{const update=()=>{const included=row.querySelector('.include').checked,kind=row.querySelector('.type').value;row.classList.toggle('excluded',!included);row.querySelector('.scale').disabled=!included||!['decimal','currency'].includes(kind);row.querySelector('.options').disabled=!included||kind!=='enum'};row.querySelector('.type').onchange=update;row.querySelector('.include').onchange=update;update()});
 }
 function collectSchema(){
   const fields=[];
@@ -207,16 +227,18 @@ async function confirmReimport(){
   catch(e){toast(e.message,true);state.reviewDigest=null;$('confirmReimport').disabled=true;}
 }
 async function openModule(id){
-  try{state.module=await api('/api/modules/'+id);state.page=1;showView('module');const schema=state.module.schema;
+  const request=++moduleRequest;recordsRequest++;
+  try{const module=await api('/api/modules/'+id);if(request!==moduleRequest)return;state.module=module;state.page=1;state.records=[];showView('module');const schema=state.module.schema;
     $('breadcrumbs').innerHTML=`${esc(currentOrg()?.name)} <span>/</span> ${esc(schema.name)}`;$('moduleTitle').textContent=schema.name;
     $('schemaButton').hidden=!canWrite();$('undoImportButton').hidden=!canWrite()||!state.module.canUndoImport;state.visibleColumns=new Set(schema.fields.map(f=>f.id));
-    $('filterField').innerHTML='<option value="">Sin filtro</option>'+schema.fields.map(f=>`<option value="${esc(f.id)}">${esc(f.label)}</option>`).join('');$('sortField').innerHTML='<option value="">Orden original</option>'+schema.fields.map(f=>`<option value="${esc(f.id)}">${esc(f.label)}</option>`).join('');$('sortField').value='';$('sortDirection').value='asc';$('searchInput').value='';$('filterValue').value='';$('filterField').value='';renderColumns();updateOperators();await refreshViews();await renderModuleAttention();await loadRecords();
-  }catch(e){toast(e.message,true)}
+    $('filterField').innerHTML='<option value="">Sin filtro</option>'+schema.fields.map(f=>`<option value="${esc(f.id)}">${esc(f.label)}</option>`).join('');$('sortField').innerHTML='<option value="">Orden original</option>'+schema.fields.map(f=>`<option value="${esc(f.id)}">${esc(f.label)}</option>`).join('');$('sortField').value='';$('sortDirection').value='asc';$('searchInput').value='';$('filterValue').value='';$('filterField').value='';$('columnsMenu').open=false;renderColumns();updateOperators();renderRecords(false);await refreshViews();await renderModuleAttention();await loadRecords();
+  }catch(e){if(request===moduleRequest){$('recordsArea').setAttribute('aria-busy','false');toast(e.message,true)}}
 }
 function renderColumns(){
   const fields=state.module.schema.fields;
   $('columnsList').innerHTML=fields.map(f=>`<label><input type="checkbox" data-column="${esc(f.id)}" ${state.visibleColumns.has(f.id)?'checked':''}> ${esc(f.label)}</label>`).join('');
-  $('columnsList').querySelectorAll('[data-column]').forEach(input=>input.onchange=()=>{if(input.checked)state.visibleColumns.add(input.dataset.column);else if(state.visibleColumns.size>1)state.visibleColumns.delete(input.dataset.column);else{input.checked=true;toast('Dejá al menos una columna visible.',true);return}loadRecords()});
+  $('columnCount').textContent=`${state.visibleColumns.size} / ${fields.length} columnas`;
+  $('columnsList').querySelectorAll('[data-column]').forEach(input=>input.onchange=()=>{if(input.checked)state.visibleColumns.add(input.dataset.column);else if(state.visibleColumns.size>1)state.visibleColumns.delete(input.dataset.column);else{input.checked=true;toast('Dejá al menos una columna visible.',true);return}renderColumns();renderRecords()});
 }
 async function refreshViews(){
   state.views=await api(`/api/modules/${state.module.id}/views`);
@@ -225,53 +247,113 @@ async function refreshViews(){
 function updateOperators(){
   const f=state.module?.schema.fields.find(x=>x.id===$('filterField').value);const kind=f?.type;
   const options=kind==='text'?[['contains','Contiene'],['eq','Igual'],['empty','Está vacío'],['not_empty','No está vacío']]:['integer','decimal','currency','date'].includes(kind)?[['eq','Igual'],['gt',kind==='date'?'Posterior a':'Mayor que'],['lt',kind==='date'?'Anterior a':'Menor que'],['empty','Está vacío'],['not_empty','No está vacío']]:[['eq','Igual'],['empty','Está vacío'],['not_empty','No está vacío']];
-  $('filterOp').innerHTML=options.map(([v,t])=>`<option value="${v}">${t}</option>`).join('');$('filterOp').disabled=!f;$('filterValue').disabled=!f;
-  if(f?.type==='enum')$('filterValue').placeholder=f.options.join(', ');else $('filterValue').placeholder='Valor';
+  $('filterOp').innerHTML=options.map(([v,t])=>`<option value="${v}">${t}</option>`).join('');$('filterOp').disabled=!f;
+  $('filterValue').value='';$('filterChoice').value='';
+  const choices=f?.type==='boolean'?[['true','Sí'],['false','No']]:f?.type==='enum'?f.options.map(v=>[v,v]):[];
+  $('filterChoice').innerHTML='<option value="">Elegir valor…</option>'+choices.map(([value,label])=>`<option value="${esc(value)}">${esc(label)}</option>`).join('');
+  $('filterValue').type=kind==='date'?'date':'text';
+  $('filterValue').inputMode=['integer','decimal','currency'].includes(kind)?'decimal':'text';
+  $('filterValue').placeholder=['integer','decimal','currency'].includes(kind)?'Ej.: 1234.50':'Escribí un valor';
+  updateFilterInput();
 }
+function updateFilterInput(){
+  const f=state.module?.schema.fields.find(x=>x.id===$('filterField').value);
+  const empty=['empty','not_empty'].includes($('filterOp').value);
+  const choice=['boolean','enum'].includes(f?.type);
+  $('filterChoice').hidden=!choice;$('filterValue').hidden=choice;
+  $('filterChoice').disabled=!f||empty;$('filterValue').disabled=!f||empty;
+  $('filterHint').textContent=!f?'La búsqueda encuentra coincidencias en las columnas de texto.':empty?'Este filtro no necesita un valor.':choice?'Elegí un valor para aplicar el filtro. Se combina con tu búsqueda.':f.type==='date'?'Elegí una fecha para aplicar el filtro. Se combina con tu búsqueda.':'Escribí un valor para aplicar el filtro. Se combina con tu búsqueda.';
+}
+function filterTerm(){return $('filterChoice').hidden?$('filterValue').value:$('filterChoice').value;}
 let searchTimer;
 async function loadRecords(){
   if(!state.module)return;
+  const request=++recordsRequest;
   const id=state.module.id,params=new URLSearchParams({page:String(state.page),q:$('searchInput').value});
-  if($('filterField').value){params.set('field',$('filterField').value);params.set('op',$('filterOp').value);params.set('value',$('filterValue').value)}
+  const term=filterTerm(),empty=['empty','not_empty'].includes($('filterOp').value);
+  if($('filterField').value&&(empty||term!=='')){params.set('field',$('filterField').value);params.set('op',$('filterOp').value);params.set('value',term)}
   if($('sortField').value){params.set('sort',$('sortField').value);params.set('direction',$('sortDirection').value)}
+  $('recordsArea').setAttribute('aria-busy','true');
   try{
-    const data=await api(`/api/modules/${id}/records?${params}`);state.records=data.items;
+    const data=await api(`/api/modules/${id}/records?${params}`);
+    if(request!==recordsRequest||state.module?.id!==id)return;
+    const lastPage=Math.max(1,Math.ceil(data.total/25));
+    if(state.page>lastPage){state.page=lastPage;return await loadRecords();}
+    state.records=data.items;
     $('moduleDescription').textContent=`${data.total} ${data.total===1?'registro':'registros'} · Información lista para consultar y editar`;
-    const fields=state.module.schema.fields.filter(f=>state.visibleColumns.has(f.id));
-    $('recordsArea').innerHTML=data.items.length?`<div class="records-scroll"><table class="records-table"><thead><tr>${fields.map(f=>`<th>${esc(f.label)}</th>`).join('')}${canWrite()?'<th>Acciones</th>':''}</tr></thead><tbody>${data.items.map(r=>`<tr>${fields.map(f=>`<td data-label="${esc(f.label)}">${displayValue(r.values[f.id],f)}</td>`).join('')}${canWrite()?`<td data-label="Acciones"><button data-edit="${r.id}" aria-label="Editar registro ${esc(r.values[state.module.schema.primaryFieldId]??'')}">Editar</button> <button class="delete" data-delete="${r.id}" aria-label="Eliminar registro ${esc(r.values[state.module.schema.primaryFieldId]??'')}">Eliminar</button></td>`:''}</tr>`).join('')}</tbody></table></div>`:'<div class="data-empty">No hay registros para mostrar.</div>';
-    $('recordsArea').querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>openRecord(state.records.find(r=>r.id===b.dataset.edit)));
-    $('recordsArea').querySelectorAll('[data-delete]').forEach(b=>b.onclick=()=>removeRecord(b.dataset.delete));
-    if(canWrite()&&state.moduleInsights?.stockFieldId){
-      $('recordsArea').querySelectorAll('[data-edit]').forEach(button=>{
-        const cell=button.closest('td');
-        cell.insertAdjacentHTML('beforeend',` <button type="button" class="movement-button" data-sale="${esc(button.dataset.edit)}">Registrar venta</button> <button type="button" class="movement-button" data-receipt="${esc(button.dataset.edit)}">Entrada de mercadería</button>`);
-      });
-      $('recordsArea').querySelectorAll('[data-sale]').forEach(button=>button.onclick=()=>openMovement(state.records.find(r=>r.id===button.dataset.sale),'sale'));
-      $('recordsArea').querySelectorAll('[data-receipt]').forEach(button=>button.onclick=()=>openMovement(state.records.find(r=>r.id===button.dataset.receipt),'receipt'));
-    }
-    $('pageInfo').textContent=`Página ${data.page} de ${Math.max(1,Math.ceil(data.total/25))} · ${data.total} registros`;
+    renderRecords(state.renderedModule===id&&state.renderedPage===state.page);
+    state.renderedModule=id;state.renderedPage=state.page;
+    $('pageInfo').textContent=`Página ${data.page} de ${lastPage} · ${data.total} registros`;
     $('prevPage').disabled=data.page<=1;$('nextPage').disabled=data.page*25>=data.total;
-  }catch(e){toast(e.message,true)}
+  }catch(e){if(request===recordsRequest)toast(e.message,true)}
+  finally{if(request===recordsRequest)$('recordsArea').setAttribute('aria-busy','false');}
 }
-function displayValue(value,field){if(value===null||value===undefined||value==='')return '<span style="color:#a0aaa0">—</span>';if(field.type==='boolean')return value?'Sí':'No';if(field.type==='currency')return 'ARS '+Number(value).toLocaleString('es-AR',{minimumFractionDigits:field.scale,maximumFractionDigits:field.scale});return esc(value)}
+function renderRecords(preserveScroll=true){
+  if(!state.module)return;
+  const previous=$('recordsArea').querySelector('.records-scroll');
+  const scroll=preserveScroll?{left:previous?.scrollLeft||0,top:previous?.scrollTop||0}:{left:0,top:0};
+  const fields=state.module.schema.fields.filter(f=>state.visibleColumns.has(f.id));
+  const numeric=f=>['integer','decimal','currency'].includes(f.type);
+  const width=f=>f.type==='text'?200:f.type==='boolean'?100:f.type==='date'?130:150;
+  const actionsWidth=canWrite()?(state.moduleInsights?.stockFieldId?230:145):0;
+  const widthTotal=fields.reduce((sum,f)=>sum+width(f),actionsWidth);
+  const kinds={text:'Aa',integer:'#',decimal:'#',currency:'$',date:'◷',boolean:'◉',enum:'≡'};
+  $('columnCount').textContent=`${fields.length} / ${state.module.schema.fields.length} columnas`;
+  $('moduleView').classList.toggle('compact',state.compact);
+  $('recordsArea').innerHTML=state.records.length?`<div class="records-scroll" role="region" aria-label="Tabla de registros, desplazable" tabindex="0"><table class="records-table" style="width:max(100%, ${widthTotal}px)"><colgroup>${fields.map(f=>`<col style="width:${width(f)}px">`).join('')}${canWrite()?`<col style="width:${actionsWidth}px">`:''}</colgroup><thead><tr>${fields.map(f=>`<th scope="col" class="${numeric(f)?'numeric':''}" title="${esc(f.label)}"><span class="head-label"><span class="field-kind" aria-hidden="true">${f.formula?'ƒ':kinds[f.type]}</span>${esc(f.label)}</span></th>`).join('')}${canWrite()?'<th scope="col" class="actions-cell">Acciones</th>':''}</tr></thead><tbody>${state.records.map(r=>`<tr>${fields.map(f=>`<td class="${numeric(f)?'numeric':''}" data-label="${esc(f.label)}"><span class="cell-value" title="${esc(r.values[f.id]??'Sin valor')}">${displayValue(r.values[f.id],f)}</span></td>`).join('')}${canWrite()?`<td class="actions-cell" data-label="Acciones"><div class="row-actions"><button data-edit="${esc(r.id)}" aria-label="Editar registro ${esc(r.values[state.module.schema.primaryFieldId]??'')}">Editar</button><button class="delete" data-delete="${esc(r.id)}" aria-label="Eliminar registro ${esc(r.values[state.module.schema.primaryFieldId]??'')}">Eliminar</button>${state.moduleInsights?.stockFieldId?`<button type="button" class="movement-button" data-sale="${esc(r.id)}">Registrar venta</button><button type="button" class="movement-button" data-receipt="${esc(r.id)}">Entrada de mercadería</button>`:''}</div></td>`:''}</tr>`).join('')}</tbody></table></div>`:'<div class="data-empty"><strong>No hay registros para mostrar</strong><p>Probá otra búsqueda o agregá un nuevo registro.</p></div>';
+  $('recordsArea').querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>openRecord(state.records.find(r=>r.id===b.dataset.edit)));
+  $('recordsArea').querySelectorAll('[data-delete]').forEach(b=>b.onclick=()=>removeRecord(b.dataset.delete));
+  $('recordsArea').querySelectorAll('[data-sale]').forEach(b=>b.onclick=()=>openMovement(state.records.find(r=>r.id===b.dataset.sale),'sale'));
+  $('recordsArea').querySelectorAll('[data-receipt]').forEach(b=>b.onclick=()=>openMovement(state.records.find(r=>r.id===b.dataset.receipt),'receipt'));
+  const viewport=$('recordsArea').querySelector('.records-scroll');
+  if(viewport){viewport.scrollLeft=scroll.left;viewport.scrollTop=scroll.top;}
+}
+function setExpanded(expanded){
+  state.expanded=expanded;document.body.classList.toggle('table-expanded',expanded);
+  $('expandTable').setAttribute('aria-pressed',String(expanded));
+  $('expandTable').textContent=expanded?'⤡ Volver a vista normal':'⤢ Ampliar';
+  document.querySelector('.sidebar').inert=expanded;
+  document.querySelector('.topbar').inert=expanded;
+}
+function displayValue(value,field){
+  if(value===null||value===undefined||value==='')return '<span class="cell-empty">—</span>';
+  if(field.type==='boolean')return `<span class="status-pill ${value?'yes':'no'}">${value?'Sí':'No'}</span>`;
+  if(field.type==='enum')return `<span class="status-pill enum">${esc(value)}</span>`;
+  if(field.type==='currency')return 'ARS '+Number(value).toLocaleString('es-AR',{minimumFractionDigits:field.scale,maximumFractionDigits:field.scale});
+  return esc(value);
+}
 function openRecord(record=null){
   if(!canWrite())return;
-  state.editing=record;$('dialogEyebrow').textContent=record?'EDITAR REGISTRO':'NUEVO REGISTRO';$('dialogTitle').textContent=state.module.schema.name;
+  $('recordError').hidden=true;state.editing=record;$('dialogEyebrow').textContent=record?'EDITAR REGISTRO':'NUEVO REGISTRO';$('dialogTitle').textContent=state.module.schema.name;
   $('recordFields').innerHTML=state.module.schema.fields.map(f=>{
     const value=record?.values[f.id]??'';let control;
     if(f.formula)control=`<input data-field="${f.id}" value="${esc(value)}" readonly aria-label="${esc(f.label)} calculado"><small>Se calcula con =${esc(f.formula)}</small>`;
-    else if(f.type==='boolean')control=`<select data-field="${f.id}"><option value="">Sin valor</option><option value="true" ${value===true?'selected':''}>Sí</option><option value="false" ${value===false?'selected':''}>No</option></select>`;
-    else if(f.type==='enum')control=`<select data-field="${f.id}"><option value="">Seleccionar</option>${f.options.map(o=>`<option value="${esc(o)}" ${value===o?'selected':''}>${esc(o)}</option>`).join('')}</select>`;
+    else if(f.type==='boolean')control=`<select data-field="${f.id}" ${f.required?'required':''}><option value="">Sin valor</option><option value="true" ${value===true?'selected':''}>Sí</option><option value="false" ${value===false?'selected':''}>No</option></select>`;
+    else if(f.type==='enum')control=`<select data-field="${f.id}" ${f.required?'required':''}><option value="">Seleccionar</option>${f.options.map(o=>`<option value="${esc(o)}" ${value===o?'selected':''}>${esc(o)}</option>`).join('')}</select>`;
     else control=`<input data-field="${f.id}" type="${f.type==='date'?'date':f.type==='integer'||f.type==='decimal'||f.type==='currency'?'number':'text'}" ${f.type==='integer'?'step="1"':f.type==='decimal'||f.type==='currency'?`step="${1/(10**f.scale)}"`:''} value="${esc(value)}" ${f.required?'required':''}>`;
     return `<label class="${f.type==='text'?'wide':''}">${esc(f.label)}${f.required?' *':''}${control}</label>`;
   }).join('');$('recordDialog').showModal();
 }
 async function saveRecord(event){
-  event.preventDefault();const values={};for(const f of state.module.schema.fields){const node=document.querySelector(`[data-field="${f.id}"]`);values[f.id]=node.value===''?null:f.type==='boolean'?node.value==='true':node.value;}
+  event.preventDefault();if(state.saving)return;const values={};for(const f of state.module.schema.fields){const node=document.querySelector(`[data-field="${f.id}"]`);values[f.id]=node.value===''?null:f.type==='boolean'?node.value==='true':node.value;}
   const id=state.module.id,edit=state.editing;const url=`/api/modules/${id}/records${edit?'/'+edit.id:''}`;
-  try{await api(url,{method:edit?'PUT':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({values})});$('recordDialog').close();toast(edit?'Registro actualizado.':'Registro creado.');await loadRecords();await refreshModules();await renderModuleAttention();}catch(e){toast(e.message,true)}
+  state.saving=true;$('recordError').hidden=true;$('saveRecordButton').disabled=true;$('saveRecordButton').textContent='Guardando…';$('closeDialog').disabled=true;$('cancelDialog').disabled=true;
+  try{await api(url,{method:edit?'PUT':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({values})});$('recordDialog').close();toast(edit?'Registro actualizado.':'Registro creado.');await loadRecords();await refreshModules();await renderModuleAttention();}catch(e){$('recordError').textContent=e.message;$('recordError').hidden=false;}
+  finally{state.saving=false;$('saveRecordButton').disabled=false;$('saveRecordButton').textContent='Guardar cambios';$('closeDialog').disabled=false;$('cancelDialog').disabled=false;}
 }
-async function removeRecord(id){if(!confirm('¿Eliminar este registro?'))return;try{await api(`/api/modules/${state.module.id}/records/${id}`,{method:'DELETE'});toast('Registro eliminado.');await loadRecords();await refreshModules();await renderModuleAttention();}catch(e){toast(e.message,true)}}
+function removeRecord(id){
+  const record=state.records.find(r=>r.id===id);if(!record)return;
+  state.pendingDelete={id,moduleId:state.module.id};$('deleteError').hidden=true;
+  $('deleteRecordName').textContent=String(record.values[state.module.schema.primaryFieldId]??'Registro sin nombre');
+  $('deleteDialog').showModal();
+}
+async function deleteRecord(event){
+  event.preventDefault();if(!state.pendingDelete||state.deleting)return;
+  const {id,moduleId}=state.pendingDelete;state.deleting=true;$('confirmDelete').disabled=true;$('confirmDelete').textContent='Eliminando…';$('closeDelete').disabled=true;$('cancelDelete').disabled=true;
+  try{await api(`/api/modules/${moduleId}/records/${id}`,{method:'DELETE'});$('deleteDialog').close();state.pendingDelete=null;toast('Registro eliminado.');if(state.module?.id===moduleId){await loadRecords();await renderModuleAttention();}await refreshModules();}
+  catch(e){$('deleteError').textContent=e.message;$('deleteError').hidden=false;}
+  finally{state.deleting=false;$('confirmDelete').disabled=false;$('confirmDelete').textContent='Eliminar registro';$('closeDelete').disabled=false;$('cancelDelete').disabled=false;}
+}
 function openMovement(record,kind){
   if(!record)return;
   state.movement={recordId:record.id,kind};
@@ -292,16 +374,16 @@ $('movementForm').onsubmit=async event=>{
   }catch(e){toast(e.message,true)}
 };
 
-$('homeButton').onclick=home;$('startImport').onclick=()=>startImport();$('importBack').onclick=home;$('fileInput').onchange=e=>upload(e.target.files[0]);
+$('homeButton').onclick=home;$('startImport').onclick=()=>startImport();$('navImport').onclick=()=>startImport();$('chooseFile').onclick=()=>$('fileInput').click();$('importBack').onclick=home;$('fileInput').onchange=e=>upload(e.target.files[0]);
 $('searchInput').oninput=()=>{clearTimeout(searchTimer);searchTimer=setTimeout(()=>{state.page=1;loadRecords()},250)};
-$('filterField').onchange=()=>{updateOperators();state.page=1;loadRecords()};$('filterOp').onchange=()=>{state.page=1;loadRecords()};$('filterValue').oninput=()=>{clearTimeout(searchTimer);searchTimer=setTimeout(()=>{state.page=1;loadRecords()},250)};
-$('clearFilter').onclick=()=>{$('filterField').value='';$('filterValue').value='';updateOperators();state.page=1;loadRecords()};
+$('filterField').onchange=()=>{updateOperators();state.page=1;loadRecords()};$('filterOp').onchange=()=>{updateFilterInput();state.page=1;loadRecords()};$('filterValue').oninput=()=>{clearTimeout(searchTimer);searchTimer=setTimeout(()=>{state.page=1;loadRecords()},250)};$('filterChoice').onchange=()=>{state.page=1;loadRecords()};
+$('clearFilter').onclick=()=>{clearTimeout(searchTimer);$('searchInput').value='';$('filterField').value='';$('filterValue').value='';$('filterChoice').value='';updateOperators();state.page=1;loadRecords()};
 $('sortField').onchange=()=>{state.page=1;loadRecords()};$('sortDirection').onchange=()=>{state.page=1;loadRecords()};
-$('saveViewButton').onclick=async()=>{const name=prompt('¿Qué nombre querés darle a esta vista? Por ejemplo: Productos con poco stock');if(!name)return;const query={q:$('searchInput').value,field:$('filterField').value,op:$('filterField').value?$('filterOp').value:'',value:$('filterValue').value,sort:$('sortField').value,direction:$('sortDirection').value,columns:[...state.visibleColumns]};try{const saved=await api(`/api/modules/${state.module.id}/views`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,query})});await refreshViews();$('savedViewSelect').value=saved.id;$('deleteViewButton').hidden=false;toast('Vista guardada para tu usuario.')}catch(e){toast(e.message,true)}};
-$('savedViewSelect').onchange=()=>{const view=state.views.find(v=>v.id===$('savedViewSelect').value);$('deleteViewButton').hidden=!view;if(!view)return;const q=view.query;$('searchInput').value=q.q||'';$('filterField').value=q.field||'';updateOperators();if(q.op)$('filterOp').value=q.op;$('filterValue').value=q.value||'';$('sortField').value=q.sort||'';$('sortDirection').value=q.direction||'asc';state.visibleColumns=new Set((q.columns||state.module.schema.fields.map(f=>f.id)).filter(fid=>state.module.schema.fields.some(f=>f.id===fid)));if(!state.visibleColumns.size)state.visibleColumns.add(state.module.schema.fields[0].id);renderColumns();state.page=1;loadRecords()};
+$('saveViewButton').onclick=async()=>{const name=prompt('¿Qué nombre querés darle a esta vista? Por ejemplo: Productos con poco stock');if(!name)return;const query={q:$('searchInput').value,field:$('filterField').value,op:$('filterField').value?$('filterOp').value:'',value:filterTerm(),sort:$('sortField').value,direction:$('sortDirection').value,columns:[...state.visibleColumns]};try{const saved=await api(`/api/modules/${state.module.id}/views`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,query})});await refreshViews();$('savedViewSelect').value=saved.id;$('deleteViewButton').hidden=false;toast('Vista guardada para tu usuario.')}catch(e){toast(e.message,true)}};
+$('savedViewSelect').onchange=()=>{const view=state.views.find(v=>v.id===$('savedViewSelect').value);$('deleteViewButton').hidden=!view;if(!view)return;const q=view.query;$('searchInput').value=q.q||'';$('filterField').value=q.field||'';updateOperators();if(q.op)$('filterOp').value=q.op;$('filterValue').value=q.value||'';$('filterChoice').value=q.value||'';updateFilterInput();$('sortField').value=q.sort||'';$('sortDirection').value=q.direction||'asc';state.visibleColumns=new Set((q.columns||state.module.schema.fields.map(f=>f.id)).filter(fid=>state.module.schema.fields.some(f=>f.id===fid)));if(!state.visibleColumns.size)state.visibleColumns.add(state.module.schema.fields[0].id);renderColumns();state.page=1;loadRecords()};
 $('deleteViewButton').onclick=async()=>{const id=$('savedViewSelect').value;if(!id||!confirm('¿Eliminar esta vista guardada? Los registros no se borrarán.'))return;try{await api(`/api/modules/${state.module.id}/views/${id}`,{method:'DELETE'});await refreshViews();toast('Vista eliminada.')}catch(e){toast(e.message,true)}};
 $('prevPage').onclick=()=>{state.page--;loadRecords()};$('nextPage').onclick=()=>{state.page++;loadRecords()};
-$('newRecordButton').onclick=()=>openRecord();$('recordForm').onsubmit=saveRecord;$('closeDialog').onclick=()=> $('recordDialog').close();$('cancelDialog').onclick=()=> $('recordDialog').close();
+$('newRecordButton').onclick=()=>openRecord();$('recordForm').onsubmit=saveRecord;$('recordDialog').oncancel=event=>{if(state.saving)event.preventDefault()};$('deleteForm').onsubmit=deleteRecord;$('deleteDialog').oncancel=event=>{if(state.deleting)event.preventDefault()};$('closeDelete').onclick=()=>$('deleteDialog').close();$('cancelDelete').onclick=()=>$('deleteDialog').close();$('closeDialog').onclick=()=> $('recordDialog').close();$('cancelDialog').onclick=()=> $('recordDialog').close();$('densityButton').onclick=()=>{state.compact=!state.compact;$('densityButton').setAttribute('aria-pressed',String(state.compact));$('densityButton').textContent=state.compact?'Filas compactas':'Filas cómodas';$('moduleView').classList.toggle('compact',state.compact)};$('expandTable').onclick=()=>setExpanded(!state.expanded);document.addEventListener('keydown',event=>{if(event.key==='Escape'&&!$('recordDialog').open&&!$('deleteDialog').open){if(state.expanded){setExpanded(false);$('expandTable').focus()}}});
 let schemaDraft=[];
 function syncSchemaDraft(){schemaDraft=schemaDraft.map((f,i)=>{const row=document.querySelector(`[data-schema-index="${i}"]`);if(!row)return f;return {...f,label:row.querySelector('.schema-label').value,type:row.querySelector('.schema-type')?.value||f.type,required:row.querySelector('.schema-required').checked,options:row.querySelector('.schema-options-input').value.split(',').map(x=>x.trim()).filter(Boolean)}})}
 function renderSchemaFields(){

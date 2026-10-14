@@ -19,6 +19,18 @@
 | 📦 | **Seguir el trabajo diario.** Registrá ventas y entradas de mercadería en módulos con stock; consultá avisos y sugerencias de reposición explicadas. |
 | 🔐 | **Separar equipos y datos.** Inicio de sesión, roles, organizaciones aisladas, actividad y copias de seguridad locales. |
 
+## La interfaz
+
+El inicio muestra los módulos, la cantidad de registros y los avisos que necesitan atención. En cada módulo, la tabla permite buscar, filtrar, ordenar y elegir columnas. Para planillas anchas, la tabla conserva los encabezados y las acciones visibles mientras desplazás el contenido; **Ampliar** usa toda la pantalla y **Esc** vuelve a la vista normal. Las vistas guardadas recuerdan la búsqueda, los filtros, el orden y las columnas.
+
+Las capturas siguientes muestran la aplicación con datos ficticios de demostración. Podés ver los archivos originales en [`docs/images/`](docs/images/README.md).
+
+| Inicio y módulos | Registros y filtros |
+|---|---|
+| ![Inicio de Tablio con resumen y módulos](docs/images/01-inicio.png) | ![Tabla de registros con búsqueda y filtros](docs/images/02-registros.png) |
+| Importación | Edición de un registro |
+| ![Revisión de una planilla antes de importar](docs/images/03-importacion.png) | ![Formulario de edición de un registro](docs/images/04-editar-registro.png) |
+
 ## Empezar en tu computadora
 
 Necesitás **Python 3.11 o superior**. Abrí la carpeta del repositorio en Visual Studio Code y usá su terminal. No hay paquetes externos que instalar.
