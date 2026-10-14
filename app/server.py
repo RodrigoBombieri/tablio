@@ -95,8 +95,20 @@ def _annotate_formula_errors(errors,sheet):
     return errors
 
 
+def _without_excluded_rows(sheet, body):
+    excluded = body.get("excludedRows", [])
+    if not isinstance(excluded, list) or len(excluded) > 5000 or any(type(n) is not int for n in excluded):
+        raise ValueError("La lista de filas excluidas no es válida.")
+    available = {row["number"] for row in sheet["rows"][1:]}
+    excluded_set = set(excluded)
+    if not excluded_set <= available:
+        raise ValueError("Una fila excluida no pertenece a la hoja.")
+    return {**sheet, "rows": [sheet["rows"][0], *(row for row in sheet["rows"][1:] if row["number"] not in excluded_set)]}
+
+
 def _review_import(preview,sheet,body):
     _correct_sheet(sheet,preview,body)
+    sheet = _without_excluded_rows(sheet, body)
     schema=validate_schema(body.get("schema",{}),infer_sheet(sheet))
     records,errors=convert_rows(sheet,schema)
     _annotate_formula_errors(errors,sheet)
@@ -107,6 +119,7 @@ def _review_import(preview,sheet,body):
 
 def _review_reimport(preview,sheet,module,body,org_id,token):
     _correct_sheet(sheet,preview,body)
+    sheet = _without_excluded_rows(sheet, body)
     schema=module["schema"]
     imported=[f for f in schema["fields"] if f.get("sourceColumn") is not None]
     headers=sheet["rows"][0]["cells"]

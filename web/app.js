@@ -1,5 +1,5 @@
 const $ = id => document.getElementById(id);
-const state = {modules:[],preview:null,module:null,page:1,editing:null,auth:null,organizationId:null,importTarget:null,reviewDigest:null,visibleColumns:null,views:[]};
+const state = {modules:[],preview:null,module:null,page:1,editing:null,auth:null,organizationId:null,importTarget:null,reviewDigest:null,visibleColumns:null,views:[],excludedRows:new Set()};
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
 async function api(path, options={}) {
@@ -82,7 +82,7 @@ async function renderModuleAttention(){
   }catch(e){target.textContent='No se pudo cargar el resumen de este módulo.'}
 }
 function home(){showView('home');$('breadcrumbs').innerHTML=esc(currentOrg()?.name)+' <span>/</span> Inicio';refreshModules().catch(e=>toast(e.message,true));}
-function startImport(target=null){if(!canWrite())return;state.importTarget=target;state.reviewDigest=null;state.preview=null;$('uploadPanel').hidden=false;$('reviewPanel').hidden=true;$('fileInput').value='';const updating=!!target;$('importEyebrow').textContent=updating?'ACTUALIZAR DATOS':'NUEVO MÓDULO';$('importTitle').textContent=updating?'Actualizar desde Excel':'Importar una planilla';$('importDescription').textContent=updating?'Elegí el Excel actualizado. Antes de guardar, vas a ver qué registros se agregarán y cuáles cambiarán. Los que no figuren en el archivo quedarán como están.':'Subí un archivo Excel y revisá cómo Tablio interpreta sus columnas.';$('breadcrumbs').innerHTML=esc(currentOrg()?.name)+' <span>/</span> '+(updating?'Actualizar datos':'Nueva importación');showView('import');setStep(1);}
+function startImport(target=null){if(!canWrite())return;state.importTarget=target;state.reviewDigest=null;state.preview=null;state.excludedRows.clear();$('uploadPanel').hidden=false;$('reviewPanel').hidden=true;$('fileInput').value='';const updating=!!target;$('importEyebrow').textContent=updating?'ACTUALIZAR DATOS':'NUEVO MÓDULO';$('importTitle').textContent=updating?'Actualizar desde Excel':'Importar una planilla';$('importDescription').textContent=updating?'Elegí el Excel actualizado. Antes de guardar, vas a ver qué registros se agregarán y cuáles cambiarán. Los que no figuren en el archivo quedarán como están.':'Subí un archivo Excel y revisá cómo Tablio interpreta sus columnas.';$('breadcrumbs').innerHTML=esc(currentOrg()?.name)+' <span>/</span> '+(updating?'Actualizar datos':'Nueva importación');showView('import');setStep(1);}
 function setStep(n){document.querySelectorAll('.step').forEach((s,i)=>s.classList.toggle('on',i<n));}
 async function upload(file){
   if(!file||!file.name.toLowerCase().endsWith('.xlsx')) return toast('Elegí un archivo XLSX.',true);
@@ -93,13 +93,28 @@ async function upload(file){
     $('toast').style.display='none';renderReview();
   }catch(e){toast(e.message,true);}
 }
+function formulaIssueMarkup(issues){
+  if(!issues.length)return '';
+  const rows=[...new Set(issues.map(issue=>issue.row))];
+  return `<section class="formula-issues" id="formulaIssueList"><h3>Fórmulas para corregir <span id="formulaIssueCount">(${issues.length})</span></h3><p>Corregí cada fórmula o excluí solo la fila afectada. Las demás filas y columnas se conservarán.</p><p id="excludedRowsSummary" role="status"></p>${rows.map(row=>`<div class="formula-column" data-issue-row="${row}"><div class="formula-column-head"><strong>Fila ${row}</strong><button class="button secondary" type="button" data-exclude-row="${row}">Excluir esta fila</button></div>${issues.filter(issue=>issue.row===row).map(issue=>`<label>Columna ${issue.column}: ${esc(issue.field)}<input class="formula-correction" data-key="${issue.row}:${issue.column}" value="${esc(issue.formula)}"><small>${esc(issue.message)}</small></label>`).join('')}</div>`).join('')}</section>`;
+}
+function bindFormulaRows(issues){
+  const list=$('formulaIssueList');if(!list)return;
+  function update(){
+    const count=issues.filter(issue=>!state.excludedRows.has(issue.row)).length;
+    $('formulaIssueCount').textContent=`(${count})`;
+    $('excludedRowsSummary').innerHTML=state.excludedRows.size?`${state.excludedRows.size} ${state.excludedRows.size===1?'fila excluida':'filas excluidas'} del módulo. <button class="button secondary" type="button" id="undoExcludedRows">Volver a incluir</button>`:'';
+    if($('undoExcludedRows'))$('undoExcludedRows').onclick=()=>{state.excludedRows.clear();list.querySelectorAll('[data-issue-row]').forEach(node=>node.hidden=false);update()};
+  }
+  list.querySelectorAll('[data-exclude-row]').forEach(button=>button.onclick=()=>{state.excludedRows.add(Number(button.dataset.excludeRow));button.closest('[data-issue-row]').hidden=true;update()});
+  update();
+}
 function renderReview(){
   const p=state.preview;$('uploadPanel').hidden=true;$('reviewPanel').hidden=false;setStep(2);
   if(state.importTarget){renderReimportReview();return;}
   const fields=p.fields.map((f,i)=>`<tr data-index="${i}"><td><input type="checkbox" class="include" ${f.ignored?'':'checked'} aria-label="Incluir ${esc(f.label)}"></td><td><input type="text" class="label" value="${esc(f.label)}" aria-label="Etiqueta de ${esc(f.label)}"><br><small>Columna ${f.sourceColumn+1}${f.formulaCount?' · Calculada':''}</small></td><td><select class="type" aria-label="Tipo de ${esc(f.label)}" ${f.formulaCount?'disabled':''}>${['text','integer','decimal','currency','date','boolean','enum'].map(t=>`<option value="${t}" ${t===f.type?'selected':''}>${({text:'Texto',integer:'Entero',decimal:'Decimal',currency:'Importe',date:'Fecha',boolean:'Sí / No',enum:'Opciones'})[t]}</option>`).join('')}</select></td><td><input type="checkbox" class="required" ${f.required?'checked':''} aria-label="Obligatorio ${esc(f.label)}"></td><td><input type="number" min="0" max="6" class="scale" value="${f.scale??2}" aria-label="Decimales de ${esc(f.label)}"></td><td><input type="text" class="options" value="${esc(f.options.join(', '))}" placeholder="Separadas por coma" aria-label="Opciones de ${esc(f.label)}"></td><td><small>${f.emptyCount} vacíos<br>${esc(f.formula?'='+f.formula:f.examples.slice(0,2).join(' · '))}</small></td></tr>`).join('');
   const issues=p.formulaIssues||[];
-  const issueColumns=[...new Set(issues.map(issue=>issue.column))];
-  const issueList=issues.length?`<section class="formula-issues" id="formulaIssueList"><h3>Fórmulas para corregir <span id="formulaIssueCount">(${issues.length})</span></h3><p>Podés corregir cada fórmula o excluir una columna completa con el botón que aparece junto a su nombre.</p>${issueColumns.map(column=>{const group=issues.filter(issue=>issue.column===column);return `<div class="formula-column" data-issue-column="${column}"><div class="formula-column-head"><strong>Columna ${column}: ${esc(group[0].field)} · ${group.length} ${group.length===1?'fórmula':'fórmulas'}</strong><button class="button secondary" type="button" data-exclude-column="${column}">Excluir esta columna</button></div>${group.map(issue=>`<label>Fila ${issue.row}<input class="formula-correction" data-key="${issue.row}:${issue.column}" value="${esc(issue.formula)}"><small>${esc(issue.message)}</small></label>`).join('')}</div>`}).join('')}</section>`:'';
+  const issueList=formulaIssueMarkup(issues);
   $('reviewPanel').innerHTML=`<div class="panel"><div class="review-header"><div><h2>Revisá la estructura</h2><p>${p.rowCount} registros · ${p.fields.length} columnas detectadas</p></div><button class="button secondary" id="changeFile" type="button">Cambiar archivo</button></div><div class="review-content"><label for="sheetSelect">Hoja del libro</label><select class="name-input" id="sheetSelect">${p.sheets.map(s=>`<option ${s===p.sheet?'selected':''}>${esc(s)}</option>`).join('')}</select><label for="moduleName">Nombre del módulo</label><input class="name-input" id="moduleName" value="${esc(p.sheet)}" maxlength="80"><div class="table-scroll"><table class="field-table"><thead><tr><th>Usar</th><th>Columna</th><th>Tipo</th><th>Obligatorio</th><th>Decimales</th><th>Opciones</th><th>Muestra</th></tr></thead><tbody>${fields}</tbody></table></div>${issueList}<p class="upload-note">Revisá las opciones y los tipos. Los importes se interpretan en ARS. Podés comprobar todas las filas antes de guardar.</p><div id="importErrors" role="alert"></div><div id="dataCorrections"></div><div id="sampleRows"></div></div><div class="review-actions"><span class="hint">Ningún registro se guardará si hay errores.</span><div><button class="button secondary" id="validateImport" type="button">Comprobar datos</button> <button class="button primary" id="confirmImport" type="button">Guardar módulo →</button></div></div></div>`;
   const suggested=p.fields.some(f=>/habilitaci[oó]n|factibilidad/i.test(f.label))?'habilitaciones':'general';
   $('moduleName').insertAdjacentHTML('afterend',`<label for="templateSelect">¿Qué tipo de planilla es?</label><select class="name-input" id="templateSelect"><option value="general">Otra planilla</option><option value="habilitaciones" ${suggested==='habilitaciones'?'selected':''}>Habilitaciones</option><option value="minimercado">Minimercado</option><option value="corralon">Corralón de materiales</option></select>${(p.warnings||[]).length?`<div class="import-warnings"><strong>Revisá estos detalles del Excel</strong><ul>${p.warnings.map(w=>`<li>${esc(w)}</li>`).join('')}</ul></div>`:''}`);
@@ -109,16 +124,8 @@ function renderReview(){
     const input=Array.from($('formulaIssueList')?.querySelectorAll('.formula-correction')||[]).find(node=>node.dataset.key===`${issue.row}:${issue.column}`);
     if(input){input.value='';input.placeholder='Escribí el valor correcto, sin =';input.setAttribute('aria-label',`Valor fijo para la fila ${issue.row}, columna ${issue.column}`);}
   }
-  $('formulaIssueList')?.querySelectorAll('[data-exclude-column]').forEach(button=>button.onclick=()=>{
-    const column=Number(button.dataset.excludeColumn);
-    const row=document.querySelector(`.field-table tr[data-index="${column-1}"]`);
-    if(row)row.querySelector('.include').checked=false;
-    button.closest('.formula-column').remove();
-    const remaining=issues.filter(issue=>document.querySelector(`.field-table tr[data-index="${issue.column-1}"] .include`)?.checked);
-    if(remaining.length)$('formulaIssueCount').textContent=`(${remaining.length})`;
-    else $('formulaIssueList').innerHTML='<h3>Fórmulas revisadas</h3><p>Excluiste las columnas con fórmulas pendientes. Comprobá los datos antes de guardar.</p>';
-  });
-  $('sheetSelect').onchange=async()=>{try{state.preview=await api(`/api/preview?token=${encodeURIComponent(p.token)}&sheet=${encodeURIComponent($('sheetSelect').value)}`);renderReview();}catch(e){toast(e.message,true)}};
+  bindFormulaRows(issues);
+  $('sheetSelect').onchange=async()=>{try{state.preview=await api(`/api/preview?token=${encodeURIComponent(p.token)}&sheet=${encodeURIComponent($('sheetSelect').value)}`);state.excludedRows.clear();renderReview();}catch(e){toast(e.message,true)}};
   $('confirmImport').onclick=confirmImport;
   $('validateImport').onclick=validateImport;
 }
@@ -137,9 +144,9 @@ function collectSchema(){
 }
 function collectCorrections(){
   const formulaCorrections={},dataCorrections={};
-  document.querySelectorAll('.formula-correction').forEach(node=>{if(node.value.trim())formulaCorrections[node.dataset.key]=node.value.trim()});
-  document.querySelectorAll('.data-correction').forEach(node=>dataCorrections[node.dataset.key]=node.value);
-  return {formulaCorrections,dataCorrections};
+  document.querySelectorAll('.formula-correction').forEach(node=>{if(node.value.trim()&&!state.excludedRows.has(Number(node.dataset.key.split(':')[0])))formulaCorrections[node.dataset.key]=node.value.trim()});
+  document.querySelectorAll('.data-correction').forEach(node=>{if(!state.excludedRows.has(Number(node.dataset.key.split(':')[0])))dataCorrections[node.dataset.key]=node.value});
+  return {formulaCorrections,dataCorrections,excludedRows:[...state.excludedRows]};
 }
 function showValidation(result){
   const prior=collectCorrections(),previous=prior.dataCorrections;
@@ -168,9 +175,10 @@ function renderReimportReview(){
   const p=state.preview,schema=state.importTarget.schema;
   const keys=schema.fields.filter(f=>f.sourceColumn!==null&&f.sourceColumn!==undefined&&!f.formula);
   const issues=p.formulaIssues||[];
-  $('reviewPanel').innerHTML=`<div class="panel"><div class="review-header"><div><h2>Revisá el Excel actualizado</h2><p>${p.rowCount} filas encontradas</p></div><button class="button secondary" id="changeFile" type="button">Cambiar archivo</button></div><div class="review-content"><label for="sheetSelect">Hoja del libro</label><select class="name-input" id="sheetSelect">${p.sheets.map(s=>`<option ${s===p.sheet?'selected':''}>${esc(s)}</option>`).join('')}</select><label for="keyField">¿Qué columna identifica a cada registro?</label><select class="name-input" id="keyField">${keys.map(f=>`<option value="${esc(f.id)}" ${f.id===schema.primaryFieldId?'selected':''}>${esc(f.label)}</option>`).join('')}</select><p class="upload-note">Por ejemplo, el código de producto. Cada valor debe ser único. Las filas que falten en el Excel no se borrarán.</p>${issues.length?`<section class="formula-issues"><h3>Fórmulas para corregir (${issues.length})</h3>${issues.map(issue=>`<label>Fila ${issue.row}, columna ${issue.column} (${esc(issue.field)})<input class="formula-correction" data-key="${issue.row}:${issue.column}" value="${esc(issue.formula)}"><small>${esc(issue.message)}</small></label>`).join('')}</section>`:''}<div id="importErrors" role="alert"></div><div id="dataCorrections"></div><div id="changePreview"></div></div><div class="review-actions"><span class="hint">Primero revisá los cambios. Nada se guarda todavía.</span><div><button class="button secondary" id="previewChanges" type="button">Revisar cambios</button> <button class="button primary" id="confirmReimport" type="button" disabled>Guardar cambios →</button></div></div></div>`;
+  $('reviewPanel').innerHTML=`<div class="panel"><div class="review-header"><div><h2>Revisá el Excel actualizado</h2><p>${p.rowCount} filas encontradas</p></div><button class="button secondary" id="changeFile" type="button">Cambiar archivo</button></div><div class="review-content"><label for="sheetSelect">Hoja del libro</label><select class="name-input" id="sheetSelect">${p.sheets.map(s=>`<option ${s===p.sheet?'selected':''}>${esc(s)}</option>`).join('')}</select><label for="keyField">¿Qué columna identifica a cada registro?</label><select class="name-input" id="keyField">${keys.map(f=>`<option value="${esc(f.id)}" ${f.id===schema.primaryFieldId?'selected':''}>${esc(f.label)}</option>`).join('')}</select><p class="upload-note">Por ejemplo, el código de producto. Cada valor debe ser único. Las filas que falten en el Excel no se borrarán.</p>${formulaIssueMarkup(issues)}<div id="importErrors" role="alert"></div><div id="dataCorrections"></div><div id="changePreview"></div></div><div class="review-actions"><span class="hint">Primero revisá los cambios. Nada se guarda todavía.</span><div><button class="button secondary" id="previewChanges" type="button">Revisar cambios</button> <button class="button primary" id="confirmReimport" type="button" disabled>Guardar cambios →</button></div></div></div>`;
+  bindFormulaRows(issues);
   $('changeFile').onclick=()=>startImport(state.importTarget);
-  $('sheetSelect').onchange=async()=>{try{state.preview=await api(`/api/preview?token=${encodeURIComponent(p.token)}&sheet=${encodeURIComponent($('sheetSelect').value)}`);state.reviewDigest=null;renderReview()}catch(e){toast(e.message,true)}};
+  $('sheetSelect').onchange=async()=>{try{state.preview=await api(`/api/preview?token=${encodeURIComponent(p.token)}&sheet=${encodeURIComponent($('sheetSelect').value)}`);state.reviewDigest=null;state.excludedRows.clear();renderReview()}catch(e){toast(e.message,true)}};
   $('previewChanges').onclick=previewChanges;$('confirmReimport').onclick=confirmReimport;
   $('keyField').onchange=()=>{state.reviewDigest=null;$('confirmReimport').disabled=true;$('changePreview').innerHTML='';};
 }

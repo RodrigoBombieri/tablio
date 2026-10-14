@@ -6,7 +6,7 @@ Tablio convierte una tabla de Excel en un módulo web para consultar y editar re
 
 ## Ejecutar en Visual Studio Code
 
-Requisito: Python 3.11 o superior. Abrí esta carpeta del repositorio en VS Code. La primera vez, creá el propietario; el comando pedirá una contraseña de al menos 12 caracteres:
+Requisito: Python 3.11 o superior. Abrí **`C:\Users\Rodrigo\Escritorio\Repositorio Git\tablio`** en VS Code y ejecutá los comandos en su terminal. Si tenías un servidor de Tablio abierto desde `C:\Users\Rodrigo\Escritorio\Tablio`, detenelo primero con Ctrl+C: esa copia anterior puede mostrar errores de «ruta no encontrada» o rechazar celdas combinadas. La primera vez, creá el propietario; el comando pedirá una contraseña de al menos 12 caracteres:
 
 ```powershell
 python -m app.admin --email vos@ejemplo.com --name "Tu nombre" --organization "Mi organización"

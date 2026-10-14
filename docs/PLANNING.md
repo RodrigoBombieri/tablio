@@ -154,5 +154,6 @@ El archivo real de habilitaciones no contiene stock ni ventas. Las sugerencias d
 | 2026-10-13 | Configuración de campos, vistas personales, búsqueda y paginación SQL | `app/store.py`, `web/index.html`, `web/app.js`, prueba HTTP |
 | 2026-10-13 | Actividad, invitaciones, recuperación y estado de backups; controles de lectura ampliados | `app/store.py`, `app/backup.py`, `compose.yaml`, pruebas de permisos y recuperación |
 | 2026-10-13 | Primera hoja real de habilitaciones, exclusión por columna, plantillas, avisos, movimientos de stock y reposición explicada | `app/xlsx_io.py`, `app/core.py`, `app/insights.py`, `app/store.py`, `web/`, validación sin incluir datos privados |
+| 2026-10-14 | Exclusión individual y reversible de filas con fórmulas conflictivas; comprobación de importación con celdas combinadas y ruta de guardado | `app/server.py`, `web/app.js`, `tests/test_app.py`; prueba HTTP con filas excluidas y libro real verificado localmente |
 
 Actualizar las casillas y agregar evidencia en esta sección cada vez que se complete una tarea. Registrar cambios de alcance o arquitectura también en DECISIONS.md. No marcar implementación o pruebas como completadas por haberlas documentado.

@@ -291,6 +291,35 @@ class AppTests(unittest.TestCase):
         _,data=self.request(f"/api/modules/{result['moduleId']}/records")
         self.assertEqual(data['items'][1]['values']['f2'],'400.000000')
 
+    def test_merged_cells_and_formula_row_exclusion(self):
+        source=write_workbook('Datos',['CODIGO','VALOR','OTRO'],[['A',10,'uno'],['B',20,'dos'],['C',30,'tres']])
+        with zipfile.ZipFile(io.BytesIO(source)) as archive:
+            contents={name:archive.read(name) for name in archive.namelist()}
+        xml=contents['xl/worksheets/sheet1.xml'].decode()
+        xml=xml.replace('<c r="B3"><v>20</v></c>','<c r="B3" t="e"><f>#REF!*2</f><v>#REF!</v></c>')
+        xml=xml.replace('</worksheet>','<mergeCells count="1"><mergeCell ref="E5:F5"/></mergeCells></worksheet>')
+        contents['xl/worksheets/sheet1.xml']=xml.encode()
+        buffer=io.BytesIO()
+        with zipfile.ZipFile(buffer,'w') as archive:
+            for name, content in contents.items(): archive.writestr(name,content)
+        status,preview=self.request('/api/analyze','POST',buffer.getvalue(),'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        self.assertEqual(status,200,preview)
+        self.assertEqual(len(preview['formulaIssues']),1)
+        schema={'schemaVersion':1,'name':'Datos','primaryFieldId':'f1','fields':[
+            {'id':'f1','label':'CODIGO','type':'text','required':False,'sourceColumn':0},
+            {'id':'f2','label':'VALOR','type':'integer','required':False,'sourceColumn':1},
+            {'id':'f3','label':'OTRO','type':'text','required':False,'sourceColumn':2}]}
+        body={'token':preview['token'],'sheet':'Datos','schema':schema,'excludedRows':[3]}
+        status,checked=self.request('/api/import/validate','POST',body)
+        self.assertEqual(status,200,checked)
+        self.assertEqual((checked['rowCount'],checked['errorCount']),(2,0))
+        status,created=self.request('/api/import','POST',body)
+        self.assertEqual(status,200,created)
+        self.assertEqual(created['count'],2)
+        _,records=self.request(f"/api/modules/{created['moduleId']}/records")
+        self.assertEqual([r['values']['f1'] for r in records['items']],['A','C'])
+        self.assertTrue(all('f3' in r['values'] for r in records['items']))
+
     def test_reimport_preview_commit_undo_and_duplicate_guard(self):
         schema={'schemaVersion':1,'revision':1,'name':'Actualizable','primaryFieldId':'f1','fields':[
             {'id':'f1','label':'Codigo','type':'text','required':True,'sourceColumn':0},
