@@ -18,6 +18,8 @@ Después ejecutá:
 python -m app.server
 ```
 
+También podés usar **Ejecutar y depurar → Iniciar Tablio (repositorio Git)** en VS Code. Al iniciar, la terminal muestra la ruta del código activo; verificá que termine en `Repositorio Git\tablio`. Si no coincide, detené ese servidor con Ctrl+C y abrí la carpeta correcta en VS Code.
+
 Abrí `http://127.0.0.1:8000` en el navegador. No hay paquetes externos que instalar. La base SQLite se crea automáticamente en `data/tablio.sqlite3`. Las importaciones pendientes se guardan temporalmente en `uploads/` y vencen a las 24 horas. Ambas rutas quedan fuera del control de versiones.
 
 Para verificar el flujo:

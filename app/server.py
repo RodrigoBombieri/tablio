@@ -500,7 +500,7 @@ def main():
     if host != "127.0.0.1" and not os.environ.get("TABLIO_ORIGIN", "").startswith("https://"):
         raise SystemExit("Configurá TABLIO_ORIGIN con la URL HTTPS pública.")
     server = ThreadingHTTPServer((host, port), Handler)
-    print(f"Tablio disponible en {host}:{port}",flush=True)
+    print(f"Tablio disponible en {host}:{port} (código: {ROOT})",flush=True)
     try: server.serve_forever()
     except KeyboardInterrupt: pass
     finally: server.server_close()
